@@ -46,11 +46,16 @@ jobs:
           TARGET_HOSTNAME='usbhub'
           EOF
 
-      - name: Enable ARM64 emulation for pi-gen
+      - name: Register ARM64 emulation
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+
+      - name: Check ARM64 chroot emulation
         run: |
-          sudo systemctl restart systemd-binfmt
-          sudo update-binfmts --enable qemu-aarch64
-          arch-test arm64
+          test_dir="$(mktemp -d)"
+          arch-test -c "$test_dir" arm64
+          rmdir "$test_dir"
 
       - name: Build Raspberry Pi OS image
         run: sudo ./.pi-gen/build.sh
