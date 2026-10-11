@@ -54,7 +54,7 @@ jobs:
       - name: Check ARM64 chroot emulation
         run: |
           test_dir="$(mktemp -d)"
-          arch-test -c "$test_dir" arm64
+          sudo arch-test -c "$test_dir" arm64
           rmdir "$test_dir"
 
       - name: Build Raspberry Pi OS image
