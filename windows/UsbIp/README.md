@@ -36,11 +36,12 @@ Keep the SSH tunnel running in its own PowerShell window:
 
     .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Tunnel
 
-In a second PowerShell window, list Pi devices and their current bus IDs:
+In a second PowerShell window, ask to claim a device. The script lists connected devices and prompts you to choose one:
 
     .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Inventory
+    .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Claim
 
-Connect one selected device by its current bus ID, for example:
+`Claim` binds the selected device on the Pi and attaches it to this PC. The Pi USB/IP host allows only one client to bind a physical device at a time; another PC can claim it after this PC disconnects. For a scripted selection, use the explicit current bus ID:
 
     .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Connect -BusId 1-1.4
 
@@ -64,10 +65,10 @@ The command asks for confirmation, detaches from Windows, then unbinds the devic
 
 ## Ownership and current limits
 
-- A physical USB device has one owner at a time. Do not USB/IP-connect a keyboard, mouse, or gamepad that is already being forwarded by the Pi HID/VHF service, or a drive currently used by iSCSI.
+- A physical USB device has one owner at a time. `Claim` is an operator-requested, exclusive claim; it is not an automatic cross-PC lease service. Do not USB/IP-connect a keyboard, mouse, or gamepad that is already being forwarded by the Pi HID/VHF service, or a drive currently used by iSCSI.
 - The Pi USB/IP daemon remains restricted to loopback; keep its SSH tunnel open while using the USB/IP connection. Do not open TCP port 3240 to Wi-Fi.
 - Storage needs safe ejection on Windows before disconnecting. The Pi-side helper also refuses to bind mounted filesystems.
 - Xbox 360 USB/IP attach and input have passed on the development PC with the rebuilt Pi USB/IP host modules. This confirms the basic attach path; it does not prove every device class.
 - The SanDisk flash drive has been listed as exportable. Windows disk/volume operation still needs a separate verification. Do not initialize or format it if Windows prompts.
 - Printer and scanner compatibility still needs device-by-device testing.
-- This script is a single-PC operator MVP. It does not yet provide zero-touch auto-attach, network discovery UI, cross-PC leases, or automatic reconnect after a device bus ID changes. Those features need a Pi lease/control service before they can be safely automated for multiple PCs.
+- The workflow still requires the operator to start the SSH tunnel, choose a device, and approve the USB/IP attach. It does not yet provide zero-touch auto-attach, network discovery UI, or automatic reconnect after a device bus ID changes. Persisted imports can reconnect on the same PC while the device remains exported; use this carefully when multiple PCs share devices.

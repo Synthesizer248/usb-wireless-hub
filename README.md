@@ -11,19 +11,17 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 
 The bootstrap downloads the pinned USBip release from its upstream GitHub release, checks the SHA-256 digest and Authenticode signature, then opens the vendor installer with a UAC prompt. The installer may briefly restart USB hubs; save work and pause USB transfers first. Windows administrator approval is required to install a kernel driver. The Pi address is saved per Windows account so later commands do not need it repeated.
 
-Keep the SSH tunnel open in one PowerShell window. In another, inventory the Pi and connect the selected device:
+Keep the SSH tunnel open in one PowerShell window. In another, claim a device for this PC:
 
 ```powershell
 .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Tunnel
 ```
 
 ```powershell
-.\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Inventory
-.\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Connect -BusId 1-1.4
-.\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Persist
+.\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Claim
 ```
 
-The final command saves selected imports for automatic reconnect by that PC. USB devices have exclusive ownership, so an operator still selects which PC gets each device. Unattended multi-PC discovery and ownership leases are not implemented yet.
+`Claim` lists devices currently attached to the Pi, lets the local operator choose one, and requests an exclusive USB/IP bind-and-attach. The first PC to claim a device gets it; another PC cannot claim it while it is bound or attached. Use `-Action Disconnect -Port <n>` to return it to the Pi, then another PC can claim it. Windows loads its normal class driver after attachment, so printers, storage, cameras, and other classes do not need a USBHub-specific device driver. The USB/IP client driver itself must be installed once per PC by the bootstrap above; Windows administrator approval is required. `-Action Persist` is optional and saves all currently imported devices on that PC for automatic reconnect.
 
 The broad goal is a wireless USB hub for devices such as flash drives, printers, and scanners. The validated HID/VHF bridge in this folder covers keyboards, mice, and the Xbox 360 gamepad. Arbitrary USB device passthrough is being evaluated on a separate USB/IP track; see [USBIP-ROADMAP.md](USBIP-ROADMAP.md). The Windows USB/IP client is maintained upstream; see [references/README.md](references/README.md).
 
@@ -196,7 +194,7 @@ The generic sender uses the paths configured in its environment file and the TLS
 
 The separate USB/IP track uses the upstream `usbip-win2` project. The Pi USB/IP daemon is configured for loopback behind SSH forwarding. The Xbox 360 controller attached through USB/IP and passed an input test on a development PC. A flash drive was listed as exportable and mounted on Windows, then safely returned to the Pi. See [windows/UsbIp/README.md](windows/UsbIp/README.md) for the current operator workflow and [USBIP-ROADMAP.md](USBIP-ROADMAP.md) for the broader product plan.
 
-The PowerShell helper at `windows/UsbIp/Invoke-UsbHubUsbIp.ps1` supports read-only Inventory/List/Ports, SetupPi to install the Pi-side mounted-storage guard, Connect to bind and attach a selected current bus ID, and Disconnect/Release to return devices to the Pi. Keep the SSH tunnel open while connected. For storage, eject it in Windows before disconnecting. Do not USB/IP-connect a device simultaneously used by Pi HID/VHF or iSCSI. This is a single-PC operator MVP: automatic network discovery, multi-PC leases, automatic reconnect, and a polished UI are not implemented yet. USB/IP is device-class agnostic, but printer, scanner, and flash-drive functionality still require hardware testing.
+The PowerShell helper at `windows/UsbIp/Invoke-UsbHubUsbIp.ps1` supports read-only Inventory/List/Ports, SetupPi to install the Pi-side mounted-storage guard, Claim for interactive device selection and exclusive bind/attach, Connect for a known bus ID, and Disconnect/Release to return devices to the Pi. Keep the SSH tunnel open while connected. For storage, eject it in Windows before disconnecting. Do not USB/IP-connect a device simultaneously used by Pi HID/VHF or iSCSI. The current workflow requires the operator to start the tunnel and select a device; automatic network discovery and a polished UI are not implemented. USB/IP is device-class agnostic, but printer, scanner, and flash-drive functionality still require hardware testing.
 
 - The .NET 10 receiver and KMDF/VHF driver build successfully. WDK Universal API validation and INF signability checks passed, and the development package was test-signed.
 - End-to-end keyboard and mouse input over Wi-Fi have been verified on the Raspberry Pi and Windows development PC. The receiver authenticated the Pi with mutual TLS and created runtime VHF devices from the attached keyboard's HID collections; Windows keyboard and mouse input worked.

@@ -9,7 +9,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Tunnel', 'Inventory', 'List', 'Ports', 'SetupPi', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')]
+    [ValidateSet('Tunnel', 'Inventory', 'List', 'Ports', 'SetupPi', 'Claim', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')]
     [string] $Action,
     [string] $PiAddress,
     [string] $PiUser,
@@ -117,7 +117,49 @@ if ($Action -eq 'SetupPi') {
     exit 0
 }
 
-if ($Action -in @('List', 'Ports', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')) { Assert-UsbIpClient }
+if ($Action -in @('List', 'Ports', 'Claim', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')) { Assert-UsbIpClient }
+
+if ($Action -eq 'Claim') {
+    Assert-PiTarget
+    Assert-SshClient
+    if (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 3240 -InformationLevel Quiet)) {
+        throw 'SSH tunnel not available on localhost:3240. Run -Action Tunnel in another PowerShell window.'
+    }
+
+    Write-Host "Reading devices attached to $PiUser@$PiAddress..."
+    $inventory = @(& $ssh.Source "$PiUser@$PiAddress" '/usr/sbin/usbip list --local' 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "Pi inventory failed with exit code $LASTEXITCODE`: $($inventory -join [Environment]::NewLine)" }
+
+    $devices = [System.Collections.Generic.List[object]]::new()
+    for ($i = 0; $i -lt $inventory.Count; $i++) {
+        $busMatch = [regex]::Match([string]$inventory[$i], '^\s*-\s*busid\s+([0-9]+-[0-9]+(?:\.[0-9]+)*)\s*(.*)$')
+        if (-not $busMatch.Success) { continue }
+
+        $description = $busMatch.Groups[2].Value.Trim()
+        if (($i + 1) -lt $inventory.Count -and [string]$inventory[$i + 1] -notmatch '^\s*-\s*busid\s+') {
+            $detail = ([string]$inventory[$i + 1]).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($detail)) {
+                $description = (@($description, $detail) -join ' ').Trim()
+            }
+        }
+        $devices.Add([pscustomobject]@{ BusId = $busMatch.Groups[1].Value; Description = $description })
+    }
+    if ($devices.Count -eq 0) { throw 'The Pi did not report any USB devices to choose from.' }
+
+    Write-Host ''
+    Write-Host 'Choose a device to claim for this PC:'
+    for ($i = 0; $i -lt $devices.Count; $i++) {
+        Write-Host ("[{0}] {1}  {2}" -f ($i + 1), $devices[$i].BusId, $devices[$i].Description)
+    }
+    $selection = Read-Host 'Enter a number (Ctrl+C to cancel)'
+    if ($selection -notmatch '^\d+$' -or [int]$selection -lt 1 -or [int]$selection -gt $devices.Count) {
+        throw 'Invalid device selection; no device was claimed.'
+    }
+
+    $BusId = $devices[[int]$selection - 1].BusId
+    Write-Host "Requesting exclusive claim for USB device $BusId."
+    $Action = 'Connect'
+}
 
 switch ($Action) {
     'List' { & $usbip list -r $Server }
