@@ -169,27 +169,60 @@ while ($true) {
 $tunnelSource = $tunnelSource.Replace('__USBHUB_SSH_EXE__', $sshClient.Source.Replace("'", "''"))
 Set-Content -LiteralPath $tunnelScript -Value $tunnelSource -Encoding UTF8
 
-$taskName = 'USBHub SSH Tunnel'
 $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$taskAction = New-ScheduledTaskAction -Execute $powershellExe -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$tunnelScript`" -PiAddress `"$PiAddress`" -PiUser `"$PiUser`" -IdentityFile `"$keyPath`""
-$taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
-$taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel Limited
-$taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
-Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings -Principal $taskPrincipal -Description 'Maintains the SSH-only USB/IP tunnel to the configured USBHub Pi.' -Force | Out-Null
-Start-ScheduledTask -TaskName $taskName
+$shell = New-Object -ComObject WScript.Shell
+$taskName = 'USBHub SSH Tunnel'
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+
+$startupDir = [Environment]::GetFolderPath('Startup')
+$startupShortcutPath = Join-Path $startupDir 'USBHub SSH Tunnel.lnk'
+$startupShortcut = $shell.CreateShortcut($startupShortcutPath)
+$startupShortcut.TargetPath = $powershellExe
+$startupShortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$tunnelScript`" -PiAddress `"$PiAddress`" -PiUser `"$PiUser`" -IdentityFile `"$keyPath`""
+$startupShortcut.WorkingDirectory = $installedUsbIpDir
+$startupShortcut.Description = 'Starts and maintains the USBHub SSH tunnel at Windows sign-in.'
+$startupShortcut.WindowStyle = 7
+$startupShortcut.Save()
+
+$stopScript = Join-Path $installedUsbIpDir 'Stop-UsbHubTunnel.ps1'
+$stopSource = @'
+param(
+    [Parameter(Mandatory = $true)][string] $TunnelScript,
+    [Parameter(Mandatory = $true)][string] $IdentityFile
+)
+$ErrorActionPreference = 'SilentlyContinue'
+$runners = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($TunnelScript) })
+$runners | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Start-Sleep -Seconds 1
+$sshProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($IdentityFile) })
+$sshProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Write-Host 'USBHub SSH tunnel stopped for this Windows session.'
+'@
+Set-Content -LiteralPath $stopScript -Value $stopSource -Encoding UTF8
 
 $claimScript = Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'
 $desktop = [Environment]::GetFolderPath('Desktop')
 $shortcutPath = Join-Path $desktop 'Claim USBHub Device.lnk'
-$shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $powershellExe
 $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$claimScript`" -Action Claim -Confirm:`$false"
 $shortcut.WorkingDirectory = $installedUsbIpDir
 $shortcut.Description = 'Choose a USB device on the USBHub and claim it for this PC.'
 $shortcut.Save()
+$stopShortcutPath = Join-Path $desktop 'Stop USBHub Tunnel.lnk'
+$stopShortcut = $shell.CreateShortcut($stopShortcutPath)
+$stopShortcut.TargetPath = $powershellExe
+$stopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$stopScript`" -TunnelScript `"$tunnelScript`" -IdentityFile `"$keyPath`""
+$stopShortcut.WorkingDirectory = $installedUsbIpDir
+$stopShortcut.Description = 'Stops the USBHub SSH tunnel until the next Windows sign-in.'
+$stopShortcut.Save()
 
-Write-Host "Automatic SSH tunnel is registered as '$taskName' and starts at Windows sign-in."
+& $powershellExe -NoProfile -ExecutionPolicy Bypass -File $stopScript -TunnelScript $tunnelScript -IdentityFile $keyPath
+Start-Process -FilePath $powershellExe -ArgumentList $startupShortcut.Arguments -WindowStyle Hidden
+
+Write-Host 'The SSH tunnel starts automatically at Windows sign-in.'
 Write-Host "Use the desktop shortcut '$shortcutPath' to request a device claim."
+Write-Host "Use '$stopShortcutPath' to stop the tunnel for the current session."
 Write-Host 'A PC still has to request ownership; USB devices are exclusive and are not automatically assigned to every connected PC.'

@@ -9,7 +9,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress 192.168.1.100
 ```
 
-The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-256 digest and Authenticode signature, and starts the official interactive setup with UAC. Save work first: setup can restart USB hubs. Administrator approval and any restart requested by the upstream installer are still required; Windows does not allow a normal user script to silently install kernel drivers. The Pi address is stored in `%LOCALAPPDATA%\UsbHub\client.json` for this Windows account. The script then installs a dedicated SSH key on the Pi, copies the client scripts into `%LOCALAPPDATA%\UsbHub\client`, registers a hidden tunnel task that starts at Windows sign-in, and creates a **Claim USBHub Device** desktop shortcut. The Pi account password is requested once while authorizing the key.
+The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-256 digest and Authenticode signature, and starts the official interactive setup with UAC. Save work first: setup can restart USB hubs. Administrator approval and any restart requested by the upstream installer are still required; Windows does not allow a normal user script to silently install kernel drivers. The Pi address is stored in `%LOCALAPPDATA%\UsbHub\client.json` for this Windows account. The script then installs a dedicated SSH key on the Pi, copies the client scripts into `%LOCALAPPDATA%\UsbHub\client`, creates a Startup-folder shortcut that keeps the tunnel open at Windows sign-in, and adds **Claim USBHub Device** and **Stop USBHub Tunnel** desktop shortcuts. The Pi account password is requested once while authorizing the key.
 
 The first setup must also install the Pi-side storage safety helper if it is not already present:
 
@@ -34,9 +34,7 @@ This copies pi/usbip/manage-usbhub-usbip.sh to /usr/local/sbin/manage-usbhub-usb
 
 After signing in to Windows, the tunnel runs automatically in the background. Plugging a device into the Pi does not silently assign it to a PC; ownership remains exclusive. On the PC that should receive the device, double-click **Claim USBHub Device** and choose it from the list. Windows then loads its normal device-class driver.
 
-The shortcut uses the installed copy of the client scripts, so the repository folder can be moved or removed after setup. To restart the tunnel manually for troubleshooting, run this in PowerShell:
-
-    Restart-ScheduledTask -TaskName 'USBHub SSH Tunnel'
+The shortcuts use the installed copy of the client scripts, so the repository folder can be moved or removed after setup. To restart the tunnel manually, double-click **Stop USBHub Tunnel**, then double-click **USBHub SSH Tunnel** in the Startup folder or sign out and back in.
 
 For command-line inventory and ownership, run the installed client script:
 
