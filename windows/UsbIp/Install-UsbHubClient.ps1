@@ -155,22 +155,28 @@ param(
     [Parameter(Mandatory = $true)][string] $IdentityFile
 )
 $ErrorActionPreference = 'Continue'
-$ssh = Get-Command ssh.exe -ErrorAction Stop
+$logFile = Join-Path $env:LOCALAPPDATA 'UsbHub\tunnel.log'
+$sshPath = '__USBHUB_SSH_EXE__'
 while ($true) {
-    & $ssh.Source -N -T -i $IdentityFile -o BatchMode=yes -o ExitOnForwardFailure=yes `
+    "$(Get-Date -Format o) Starting SSH tunnel to $PiAddress" | Add-Content -LiteralPath $logFile
+    & $sshPath -N -T -i $IdentityFile -o BatchMode=yes -o ExitOnForwardFailure=yes `
         -o ServerAliveInterval=30 -o ServerAliveCountMax=3 `
-        -L '3240:127.0.0.1:3240' "$PiUser@$PiAddress"
+        -L '3240:127.0.0.1:3240' "$PiUser@$PiAddress" 2>> $logFile
+    "$(Get-Date -Format o) SSH exited with code $LASTEXITCODE; retrying shortly" | Add-Content -LiteralPath $logFile
     Start-Sleep -Seconds 5
 }
 '@
+$tunnelSource = $tunnelSource.Replace('__USBHUB_SSH_EXE__', $sshClient.Source.Replace("'", "''"))
 Set-Content -LiteralPath $tunnelScript -Value $tunnelSource -Encoding UTF8
 
 $taskName = 'USBHub SSH Tunnel'
 $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $taskAction = New-ScheduledTaskAction -Execute $powershellExe -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$tunnelScript`" -PiAddress `"$PiAddress`" -PiUser `"$PiUser`" -IdentityFile `"$keyPath`""
-$taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-$taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable
-Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings -Description 'Maintains the SSH-only USB/IP tunnel to the configured USBHub Pi.' -Force | Out-Null
+$taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel Limited
+$taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings -Principal $taskPrincipal -Description 'Maintains the SSH-only USB/IP tunnel to the configured USBHub Pi.' -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
 
 $claimScript = Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'
