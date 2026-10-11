@@ -34,7 +34,9 @@ This copies pi/usbip/manage-usbhub-usbip.sh to /usr/local/sbin/manage-usbhub-usb
 
 After signing in to Windows, the tunnel runs automatically in the background. Plugging a device into the Pi does not silently assign it to a PC; ownership remains exclusive. On the PC that should receive the device, double-click **Claim USBHub Device** and choose it from the list. Windows then loads its normal device-class driver.
 
-The shortcut uses the installed copy of the client scripts, so the repository folder can be moved or removed after setup. To start the tunnel manually for troubleshooting, run the installed `Start-UsbHubTunnel.ps1` from `%LOCALAPPDATA%\UsbHub\client\windows\UsbIp`.
+The shortcut uses the installed copy of the client scripts, so the repository folder can be moved or removed after setup. To restart the tunnel manually for troubleshooting, run this in PowerShell:
+
+    Restart-ScheduledTask -TaskName 'USBHub SSH Tunnel'
 
 For command-line inventory and ownership, run the installed client script:
 
@@ -69,7 +71,7 @@ The command asks for confirmation, detaches from Windows, then unbinds the devic
 - The Pi USB/IP daemon remains restricted to loopback; keep its SSH tunnel open while using the USB/IP connection. Do not open TCP port 3240 to Wi-Fi.
 - Storage needs safe ejection on Windows before disconnecting. The Pi-side helper also refuses to bind mounted filesystems.
 - Xbox 360 USB/IP attach and input have passed on the development PC with the rebuilt Pi USB/IP host modules. This confirms the basic attach path; it does not prove every device class.
-- The SanDisk flash drive has been listed as exportable. Windows disk/volume operation still needs a separate verification. Do not initialize or format it if Windows prompts.
+- A SanDisk flash drive was exported and mounted by Windows as a FAT32 volume with drive letter F: on the development PC. Other drives and filesystems still need validation. Do not initialize or format a disk if Windows prompts.
 - Printer and scanner compatibility still needs device-by-device testing.
 - The current PC must explicitly claim a device from the desktop shortcut. Zero-touch auto-claim across multiple PCs is not enabled because it would give one PC ownership without a user request and cause ownership races. The SSH tunnel starts automatically at sign-in and retries after connection loss.
 - The task is registered for the current Windows user. Windows kernel client installation still requires one-time administrator approval; the installer may request a restart.

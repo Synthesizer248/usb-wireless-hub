@@ -169,7 +169,7 @@ $shortcutPath = Join-Path $desktop 'Claim USBHub Device.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $powershellExe
-$shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$claimScript`" -Action Claim"
+$shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$claimScript`" -Action Claim -Confirm:`$false"
 $shortcut.WorkingDirectory = $installedUsbIpDir
 $shortcut.Description = 'Choose a USB device on the USBHub and claim it for this PC.'
 $shortcut.Save()
