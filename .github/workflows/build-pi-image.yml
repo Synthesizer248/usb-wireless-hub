@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-image:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     steps:
       - name: Check out USBHub
@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y coreutils quilt parted qemu-user-binfmt debootstrap zerofree zip \
             dosfstools e2fsprogs libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc \
-            gpg pigz xxd arch-test bmap-tools kmod binfmt-support
+            gpg pigz xxd arch-test bmap-tools kmod
 
       - name: Prepare pinned pi-gen build
         env:
@@ -46,16 +46,10 @@ jobs:
           TARGET_HOSTNAME='usbhub'
           EOF
 
-      - name: Register ARM64 emulation
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-        with:
-          platforms: arm64
-
-      - name: Check ARM64 chroot emulation
+      - name: Confirm native ARM64 build runner
         run: |
-          test_dir="$(mktemp -d)"
-          sudo arch-test -c "$test_dir" arm64
-          rmdir "$test_dir"
+          test "$(dpkg --print-architecture)" = arm64
+          arch-test -n arm64
 
       - name: Build Raspberry Pi OS image
         run: sudo ./.pi-gen/build.sh
