@@ -58,12 +58,40 @@ jobs:
         id: image
         run: |
           set -euo pipefail
-          image="$(find .pi-gen/deploy -maxdepth 1 -type f -name '*.img.xz' -print -quit)"
-          test -n "$image"
+          deploy=.pi-gen/deploy
+          mkdir -p "$deploy"
+          archive="$(find "$deploy" -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          if [ -n "$archive" ]; then
+            mapfile -t images < <(python3 - "$archive" "$deploy" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          archive = pathlib.Path(sys.argv[1])
+          output = pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(archive) as zf:
+              names = [n for n in zf.namelist() if n.lower().endswith('.img')]
+              if len(names) != 1:
+                  raise SystemExit(f"Expected one disk image in {archive}, found {len(names)}")
+              target = output / pathlib.Path(names[0]).name
+              with zf.open(names[0]) as src, target.open('wb') as dst:
+                  while chunk := src.read(8 * 1024 * 1024):
+                      dst.write(chunk)
+          print(target)
+          PY
+            )
+            test "${#images[@]}" -eq 1
+            rm "$archive"
+          else
+            mapfile -t images < <(find "$deploy" -maxdepth 1 -type f -name '*.img' -print)
+            test "${#images[@]}" -eq 1
+          fi
+          xz -T0 -3 "${images[0]}"
+          image="${images[0]}.xz"
           xz -t "$image"
           (cd "$(dirname "$image")" && sha256sum "$(basename "$image")" > "$(basename "$image").sha256")
           echo "image=$image" >> "$GITHUB_OUTPUT"
-          ls -lh "$image" "$image.sha256"
+          ls -lh "$image" "${image}.sha256"
 
       - name: Publish flash image release
         env:
