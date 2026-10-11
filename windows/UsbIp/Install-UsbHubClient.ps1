@@ -99,6 +99,81 @@ Move-Item -LiteralPath $tempConfig -Destination $configPath -Force
 
 Write-Host "USBip client is ready at: $usbipExe"
 Write-Host "Saved this hub as $PiUser@$PiAddress for the current Windows account."
-Write-Host 'Next: open a PowerShell window in this project folder and run:'
-Write-Host '  .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Tunnel'
-Write-Host 'Then in another window run Inventory and Connect for the device you want to claim.'
+
+# Keep the client scripts in the per-user app-data folder so shortcuts and the
+# logon task continue working if the source checkout is moved or removed.
+$clientRoot = Join-Path $configDir 'client'
+$installedUsbIpDir = Join-Path $clientRoot 'windows\UsbIp'
+$installedPiUsbIpDir = Join-Path $clientRoot 'pi\usbip'
+New-Item -ItemType Directory -Path $installedUsbIpDir, $installedPiUsbIpDir -Force | Out-Null
+Copy-Item -Path (Join-Path $PSScriptRoot '*.ps1') -Destination $installedUsbIpDir -Force
+Copy-Item -Path (Join-Path $PSScriptRoot '..\..\pi\usbip\*') -Destination $installedPiUsbIpDir -Force
+
+# Establish key-based SSH once so the hidden logon tunnel does not wait for an
+# invisible password prompt. Only the public key is installed on the Pi.
+$sshClient = Get-Command ssh.exe -ErrorAction SilentlyContinue
+if (-not $sshClient) { throw 'OpenSSH Client (ssh.exe) was not found. Install the Windows OpenSSH Client feature.' }
+$sshDir = Join-Path $env:USERPROFILE '.ssh'
+New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+$keySuffix = ($PiAddress -replace '[^A-Za-z0-9.-]', '_')
+$keyPath = Join-Path $sshDir "usbhub_$keySuffix_ed25519"
+$publicKeyPath = "$keyPath.pub"
+if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
+    & ssh-keygen.exe -t ed25519 -N '' -C "usbhub-$PiAddress" -f $keyPath
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create the SSH key for the USBHub tunnel.' }
+}
+elseif (-not (Test-Path -LiteralPath $publicKeyPath -PathType Leaf)) {
+    & ssh-keygen.exe -y -f $keyPath | Set-Content -LiteralPath $publicKeyPath -Encoding ASCII
+    if ($LASTEXITCODE -ne 0) { throw 'Could not derive the public SSH key for the USBHub tunnel.' }
+}
+$keyLine = (Get-Content -LiteralPath $publicKeyPath -Raw).Trim()
+$remoteKeyInstall = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF '$keyLine' ~/.ssh/authorized_keys || printf '%s\n' '$keyLine' >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys"
+$sshClient = Get-Command ssh.exe -ErrorAction Stop
+& $sshClient.Source -o BatchMode=yes -o "IdentityFile=$keyPath" "$PiUser@$PiAddress" 'exit 0' 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Authorize this PC’s public SSH key on the Pi. Enter the Pi account password when prompted.'
+    & $sshClient.Source -o PreferredAuthentications=password -o PubkeyAuthentication=no "$PiUser@$PiAddress" $remoteKeyInstall
+    if ($LASTEXITCODE -ne 0) { throw 'Could not install the SSH public key on the Pi; the automatic tunnel was not configured.' }
+}
+
+$tunnelScript = Join-Path $installedUsbIpDir 'Start-UsbHubTunnel.ps1'
+$tunnelSource = @'
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string] $PiAddress,
+    [Parameter(Mandatory = $true)][string] $PiUser,
+    [Parameter(Mandatory = $true)][string] $IdentityFile
+)
+$ErrorActionPreference = 'Continue'
+$ssh = Get-Command ssh.exe -ErrorAction Stop
+while ($true) {
+    & $ssh.Source -N -T -i $IdentityFile -o BatchMode=yes -o ExitOnForwardFailure=yes `
+        -o ServerAliveInterval=30 -o ServerAliveCountMax=3 `
+        -L '3240:127.0.0.1:3240' "$PiUser@$PiAddress"
+    Start-Sleep -Seconds 5
+}
+'@
+Set-Content -LiteralPath $tunnelScript -Value $tunnelSource -Encoding UTF8
+
+$taskName = 'USBHub SSH Tunnel'
+$powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$taskAction = New-ScheduledTaskAction -Execute $powershellExe -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$tunnelScript`" -PiAddress `"$PiAddress`" -PiUser `"$PiUser`" -IdentityFile `"$keyPath`""
+$taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+$taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable
+Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings -Description 'Maintains the SSH-only USB/IP tunnel to the configured USBHub Pi.' -Force | Out-Null
+Start-ScheduledTask -TaskName $taskName
+
+$claimScript = Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'
+$desktop = [Environment]::GetFolderPath('Desktop')
+$shortcutPath = Join-Path $desktop 'Claim USBHub Device.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $powershellExe
+$shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$claimScript`" -Action Claim"
+$shortcut.WorkingDirectory = $installedUsbIpDir
+$shortcut.Description = 'Choose a USB device on the USBHub and claim it for this PC.'
+$shortcut.Save()
+
+Write-Host "Automatic SSH tunnel is registered as '$taskName' and starts at Windows sign-in."
+Write-Host "Use the desktop shortcut '$shortcutPath' to request a device claim."
+Write-Host 'A PC still has to request ownership; USB devices are exclusive and are not automatically assigned to every connected PC.'

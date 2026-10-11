@@ -9,7 +9,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress 192.168.1.100
 ```
 
-The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-256 digest and Authenticode signature, and starts the official interactive setup with UAC. Save work first: setup can restart USB hubs. Administrator approval and any restart requested by the upstream installer are still required; Windows does not allow a normal user script to silently install kernel drivers. The Pi address is stored in `%LOCALAPPDATA%\UsbHub\client.json` for this Windows account.
+The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-256 digest and Authenticode signature, and starts the official interactive setup with UAC. Save work first: setup can restart USB hubs. Administrator approval and any restart requested by the upstream installer are still required; Windows does not allow a normal user script to silently install kernel drivers. The Pi address is stored in `%LOCALAPPDATA%\UsbHub\client.json` for this Windows account. The script then installs a dedicated SSH key on the Pi, copies the client scripts into `%LOCALAPPDATA%\UsbHub\client`, registers a hidden tunnel task that starts at Windows sign-in, and creates a **Claim USBHub Device** desktop shortcut. The Pi account password is requested once while authorizing the key.
 
 The first setup must also install the Pi-side storage safety helper if it is not already present:
 
@@ -30,16 +30,16 @@ From Windows PowerShell, in the repository directory:
 
 This copies pi/usbip/manage-usbhub-usbip.sh to /usr/local/sbin/manage-usbhub-usbip on the Pi. The helper refuses to export storage that Linux currently reports as mounted. SSH and sudo may each ask for the Pi account password.
 
-## Connect a device
+## Use after setup
 
-Keep the SSH tunnel running in its own PowerShell window:
+After signing in to Windows, the tunnel runs automatically in the background. Plugging a device into the Pi does not silently assign it to a PC; ownership remains exclusive. On the PC that should receive the device, double-click **Claim USBHub Device** and choose it from the list. Windows then loads its normal device-class driver.
 
-    .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Tunnel
+The shortcut uses the installed copy of the client scripts, so the repository folder can be moved or removed after setup. To start the tunnel manually for troubleshooting, run the installed `Start-UsbHubTunnel.ps1` from `%LOCALAPPDATA%\UsbHub\client\windows\UsbIp`.
 
-In a second PowerShell window, ask to claim a device. The script lists connected devices and prompts you to choose one:
+For command-line inventory and ownership, run the installed client script:
 
-    .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Inventory
-    .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Claim
+    & "$env:LOCALAPPDATA\UsbHub\client\windows\UsbIp\Invoke-UsbHubUsbIp.ps1" -Action Inventory
+    & "$env:LOCALAPPDATA\UsbHub\client\windows\UsbIp\Invoke-UsbHubUsbIp.ps1" -Action Claim
 
 `Claim` binds the selected device on the Pi and attaches it to this PC. The Pi USB/IP host allows only one client to bind a physical device at a time; another PC can claim it after this PC disconnects. For a scripted selection, use the explicit current bus ID:
 
@@ -71,4 +71,5 @@ The command asks for confirmation, detaches from Windows, then unbinds the devic
 - Xbox 360 USB/IP attach and input have passed on the development PC with the rebuilt Pi USB/IP host modules. This confirms the basic attach path; it does not prove every device class.
 - The SanDisk flash drive has been listed as exportable. Windows disk/volume operation still needs a separate verification. Do not initialize or format it if Windows prompts.
 - Printer and scanner compatibility still needs device-by-device testing.
-- The workflow still requires the operator to start the SSH tunnel, choose a device, and approve the USB/IP attach. It does not yet provide zero-touch auto-attach, network discovery UI, or automatic reconnect after a device bus ID changes. Persisted imports can reconnect on the same PC while the device remains exported; use this carefully when multiple PCs share devices.
+- The current PC must explicitly claim a device from the desktop shortcut. Zero-touch auto-claim across multiple PCs is not enabled because it would give one PC ownership without a user request and cause ownership races. The SSH tunnel starts automatically at sign-in and retries after connection loss.
+- The task is registered for the current Windows user. Windows kernel client installation still requires one-time administrator approval; the installer may request a restart.
