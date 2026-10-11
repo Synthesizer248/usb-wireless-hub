@@ -1,0 +1,68 @@
+;
+; UsbHubVhfKeyboard.inf
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = UsbHubVhfKeyboard.cat
+DriverVer   = ; TODO: set DriverVer in stampinf property pages
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+UsbHubVhfKeyboard.sys  = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$.10.0...16299 ; %13% support introduced in build 16299
+
+[Standard.NT$ARCH$.10.0...16299]
+%UsbHubVhfKeyboard.DeviceDesc% = UsbHubVhfKeyboard_Device, Root\UsbHubVhfGenericHid
+
+[UsbHubVhfKeyboard_Device.NT]
+CopyFiles = File_Copy
+
+[UsbHubVhfKeyboard_Device.NT.HW]
+AddReg = UsbHubVhfKeyboard_Device.NT.HW.AddReg
+
+[UsbHubVhfKeyboard_Device.NT.HW.AddReg]
+HKR,,"LowerFilters",0x00010000,"vhf"
+
+[File_Copy]
+UsbHubVhfKeyboard.sys
+
+;-------------- Service installation
+[UsbHubVhfKeyboard_Device.NT.Services]
+AddService = UsbHubVhfGenericHid,%SPSVCINST_ASSOCSERVICE%, UsbHubVhfGenericHid_Service_Inst
+
+; -------------- Generic USBHub VHF bridge driver install sections
+[UsbHubVhfGenericHid_Service_Inst]
+DisplayName    = %UsbHubVhfGenericHid.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\UsbHubVhfKeyboard.sys
+
+[UsbHubVhfKeyboard_Device.NT.Wdf]
+KmdfService = UsbHubVhfGenericHid, UsbHubVhfGenericHid_wdfsect
+
+[UsbHubVhfGenericHid_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName = "USBHub Project"
+DiskName = "USBHub Generic HID Bridge Installation Disk"
+UsbHubVhfKeyboard.DeviceDesc = "USBHub Generic Virtual HID Bridge"
+UsbHubVhfGenericHid.SVCDESC = "USBHub Generic VHF HID Service"

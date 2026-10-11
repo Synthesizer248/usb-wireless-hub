@@ -1,0 +1,46 @@
+# Visual Studio and Windows driver build output
+.vs/
+x64/
+Win32/
+ARM64/
+Debug/
+Release/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.pdb
+*.ilk
+*.obj
+*.tlog/
+*.lastbuildstate
+*.recipe
+*.tmh
+*.cat
+*.sys
+
+# .NET build output
+windows/Receiver/bin/
+windows/Receiver/obj/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local certs, private keys, and per-machine settings
+*.pfx
+*.p12
+*.key
+*.dpapi
+*.cer
+*.crt
+*.env
+*.log
+certs/
+client.json
+receiver-password.dpapi
+
+# Large upstream working copy and downloaded WDK packages; upstream link and
+# license details are documented under references/README.md.
+references/usbip-win2/
+

@@ -1,0 +1,20 @@
+[Unit]
+Description=USBHub USB/IP server (SSH tunnel only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/sbin/modprobe usbip-core
+ExecStartPre=/usr/sbin/modprobe usbip-host
+ExecStartPre=-/usr/sbin/nft delete table inet usbhub_usbip
+ExecStartPre=/usr/sbin/nft add table inet usbhub_usbip
+ExecStartPre=/usr/sbin/nft "add chain inet usbhub_usbip input { type filter hook input priority -5; policy accept; }"
+ExecStartPre=/usr/sbin/nft add rule inet usbhub_usbip input iifname lo tcp dport 3240 accept
+ExecStartPre=/usr/sbin/nft add rule inet usbhub_usbip input tcp dport 3240 drop
+ExecStart=/usr/sbin/usbipd -4
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
