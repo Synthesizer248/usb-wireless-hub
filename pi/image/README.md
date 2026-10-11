@@ -12,8 +12,8 @@ The image build targets 64-bit Raspberry Pi OS Lite and is intended first for Ra
 
 ## Flash and first boot
 
-1. Download `USBHub-rpios-lite-arm64.img.xz` and its `.sha256` file from the GitHub Release.
-2. Verify the file with `sha256sum -c USBHub-rpios-lite-arm64.img.xz.sha256` on Linux/macOS, or `Get-FileHash -Algorithm SHA256` on Windows and compare the digest.
+1. Download the `.img.xz` image and its matching `.img.xz.sha256` checksum file from the [latest GitHub Release](https://github.com/Synthesizer248/usb-wireless-hub/releases/latest). The filename includes the Raspberry Pi OS build date.
+2. Verify the image against the checksum before flashing. On Linux/macOS, run `sha256sum -c <image-filename>.sha256` in the download folder. On Windows, run `Get-FileHash -Algorithm SHA256 .\<image-filename>` and compare its hash with the digest in the downloaded `.sha256` file.
 3. In Raspberry Pi Imager, choose **Use custom** and select the `.img.xz` file. Choose the destination SD card, then configure a unique hostname, username/password, Wi-Fi country/network, and SSH access.
 4. Boot the Pi and connect to it over SSH. USB/IP server startup is automatic. TCP port 3240 is accepted only on loopback, so Windows clients must tunnel it over SSH.
 5. On each Windows PC, install the USB/IP client once with the project bootstrap, keep the SSH tunnel open, then use `Invoke-UsbHubUsbIp.ps1 -Action Claim` to request a device.
