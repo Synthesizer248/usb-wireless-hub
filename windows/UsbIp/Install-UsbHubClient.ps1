@@ -116,7 +116,7 @@ if (-not $sshClient) { throw 'OpenSSH Client (ssh.exe) was not found. Install th
 $sshDir = Join-Path $env:USERPROFILE '.ssh'
 New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
 $keySuffix = ($PiAddress -replace '[^A-Za-z0-9.-]', '_')
-$keyPath = Join-Path $sshDir "usbhub_$keySuffix_ed25519"
+$keyPath = Join-Path $sshDir "usbhub_${keySuffix}_ed25519"
 $publicKeyPath = "$keyPath.pub"
 if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
     $keygenPath = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
@@ -131,8 +131,16 @@ elseif (-not (Test-Path -LiteralPath $publicKeyPath -PathType Leaf)) {
 $keyLine = (Get-Content -LiteralPath $publicKeyPath -Raw).Trim()
 $remoteKeyInstall = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF '$keyLine' ~/.ssh/authorized_keys || printf '%s\n' '$keyLine' >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys"
 $sshClient = Get-Command ssh.exe -ErrorAction Stop
-& $sshClient.Source -o BatchMode=yes -o "IdentityFile=$keyPath" "$PiUser@$PiAddress" 'exit 0' 2>$null
-if ($LASTEXITCODE -ne 0) {
+$savedErrorPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & $sshClient.Source -o BatchMode=yes -o "IdentityFile=$keyPath" "$PiUser@$PiAddress" 'exit 0' 2>$null
+    $keyAuthExitCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $savedErrorPreference
+}
+if ($keyAuthExitCode -ne 0) {
     Write-Host 'Authorize this PC’s public SSH key on the Pi. Enter the Pi account password when prompted.'
     & $sshClient.Source -o PreferredAuthentications=password -o PubkeyAuthentication=no "$PiUser@$PiAddress" $remoteKeyInstall
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the SSH public key on the Pi; the automatic tunnel was not configured.' }
