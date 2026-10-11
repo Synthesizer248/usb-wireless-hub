@@ -119,8 +119,10 @@ $keySuffix = ($PiAddress -replace '[^A-Za-z0-9.-]', '_')
 $keyPath = Join-Path $sshDir "usbhub_$keySuffix_ed25519"
 $publicKeyPath = "$keyPath.pub"
 if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
-    & ssh-keygen.exe -t ed25519 -N '' -C "usbhub-$PiAddress" -f $keyPath
-    if ($LASTEXITCODE -ne 0) { throw 'Could not create the SSH key for the USBHub tunnel.' }
+    $keygenPath = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
+    $keygenArguments = '-t ed25519 -N "" -C "usbhub-{0}" -f "{1}"' -f $PiAddress, $keyPath
+    $keygen = Start-Process -FilePath $keygenPath -ArgumentList $keygenArguments -NoNewWindow -Wait -PassThru
+    if ($keygen.ExitCode -ne 0) { throw 'Could not create the SSH key for the USBHub tunnel.' }
 }
 elseif (-not (Test-Path -LiteralPath $publicKeyPath -PathType Leaf)) {
     & ssh-keygen.exe -y -f $keyPath | Set-Content -LiteralPath $publicKeyPath -Encoding ASCII
