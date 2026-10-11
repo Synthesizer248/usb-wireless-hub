@@ -46,6 +46,12 @@ jobs:
           TARGET_HOSTNAME='usbhub'
           EOF
 
+      - name: Enable ARM64 emulation for pi-gen
+        run: |
+          sudo systemctl restart systemd-binfmt
+          sudo update-binfmts --enable qemu-aarch64
+          arch-test arm64
+
       - name: Build Raspberry Pi OS image
         run: sudo ./.pi-gen/build.sh
 
