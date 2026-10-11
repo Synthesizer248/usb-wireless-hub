@@ -44,6 +44,12 @@ Connect one selected device by its current bus ID, for example:
 
     .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Connect -BusId 1-1.4
 
+After connecting the devices this PC should reconnect, save those imports as persistent:
+
+    .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Persist
+
+This saves every currently imported device and lets the upstream USBip client retry attachments after driver load or connection loss. Keep the SSH tunnel available, and do not persist a device intended for another PC. See the upstream [persistent device and automatic reattachment notes](https://github.com/vadimgrn/usbip-win2/wiki/How-automatic-reattachment-works).
+
 Connect exports the selected device through the Pi safety helper, then attaches it through the SSH tunnel. Windows should enumerate it with its normal device-class driver. Bus IDs can change after unplugging or rebooting, so get a fresh inventory before connecting.
 
 Inspect active connections:
@@ -54,7 +60,7 @@ For storage, close open files and use Windows Safely Remove Hardware first. Then
 
     .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Disconnect -Port 1
 
-The command asks for confirmation, detaches from Windows, then unbinds the device on the Pi. Action Release with BusId returns an already-disconnected export to the Pi. Action Attach is available only for a device that was exported separately.
+The command asks for confirmation, detaches from Windows, then unbinds the device on the Pi. Action Release with BusId returns an already-disconnected export to the Pi. Action Attach is available only for a device that was exported separately. Action Persist saves the current imports for reattachment by that Windows PC.
 
 ## Ownership and current limits
 

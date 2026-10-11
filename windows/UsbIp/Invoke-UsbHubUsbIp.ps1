@@ -9,7 +9,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Tunnel', 'Inventory', 'List', 'Ports', 'SetupPi', 'Connect', 'Attach', 'Disconnect', 'Release')]
+    [ValidateSet('Tunnel', 'Inventory', 'List', 'Ports', 'SetupPi', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')]
     [string] $Action,
     [string] $PiAddress,
     [string] $PiUser,
@@ -117,11 +117,19 @@ if ($Action -eq 'SetupPi') {
     exit 0
 }
 
-if ($Action -in @('List', 'Ports', 'Connect', 'Attach', 'Disconnect', 'Release')) { Assert-UsbIpClient }
+if ($Action -in @('List', 'Ports', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')) { Assert-UsbIpClient }
 
 switch ($Action) {
     'List' { & $usbip list -r $Server }
     'Ports' { & $usbip port }
+    'Persist' {
+        Write-Warning 'This saves every currently imported device for automatic reattachment on this PC. Disconnect anything you do not want this PC to claim again.'
+        if ($PSCmdlet.ShouldProcess('all currently imported USB/IP devices', 'Save as persistent reconnect targets')) {
+            & $usbip port --stash
+            if ($LASTEXITCODE -ne 0) { throw "Could not save persistent USB/IP devices (exit $LASTEXITCODE)." }
+            Write-Host 'Current USB/IP imports are saved for automatic reattachment by the USBip driver.'
+        }
+    }
     'Connect' {
         Assert-PiTarget
         if ([string]::IsNullOrWhiteSpace($BusId)) { throw 'Pass -BusId from Inventory/List.' }

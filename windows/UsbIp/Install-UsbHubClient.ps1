@@ -46,14 +46,22 @@ $configDir = Join-Path $env:LOCALAPPDATA 'UsbHub'
 $downloadDir = Join-Path $configDir 'downloads'
 $configPath = Join-Path $configDir 'client.json'
 $installerPath = Join-Path $downloadDir $asset
+$requiredVersion = [version]$version
 New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
 
 $usbipExe = Join-Path $env:ProgramFiles 'USBip\usbip.exe'
-if (-not (Test-Path -LiteralPath $usbipExe -PathType Leaf)) {
+$x86UsbipExe = Join-Path ${env:ProgramFiles(x86)} 'USBip\usbip.exe'
+if (-not (Test-Path -LiteralPath $usbipExe -PathType Leaf)) { $usbipExe = $x86UsbipExe }
+$installedVersion = $null
+if (Test-Path -LiteralPath $usbipExe -PathType Leaf) {
+    try { $installedVersion = [version](Get-Item -LiteralPath $usbipExe).VersionInfo.ProductVersion } catch { $installedVersion = $null }
+}
+
+if (-not $installedVersion -or $installedVersion -lt $requiredVersion) {
     Write-Warning 'The USBip installer may briefly restart USB hubs. Save open files and pause active USB transfers before continuing.'
     if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf) -or
         (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash -ne $expectedSha256) {
-        Invoke-WebRequest -Uri "$releaseBase/$asset" -OutFile $installerPath
+        Invoke-WebRequest -UseBasicParsing -Uri "$releaseBase/$asset" -OutFile $installerPath
     }
 
     $actualSha256 = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash
@@ -75,7 +83,7 @@ if (-not (Test-Path -LiteralPath $usbipExe -PathType Leaf)) {
 }
 
 if (-not (Test-Path -LiteralPath $usbipExe -PathType Leaf)) {
-    $usbipExe = Join-Path ${env:ProgramFiles(x86)} 'USBip\usbip.exe'
+    if (Test-Path -LiteralPath $x86UsbipExe -PathType Leaf) { $usbipExe = $x86UsbipExe }
 }
 if (-not (Test-Path -LiteralPath $usbipExe -PathType Leaf)) {
     throw 'The USBip installer completed, but usbip.exe was not found under Program Files.'

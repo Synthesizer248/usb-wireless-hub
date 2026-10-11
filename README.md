@@ -20,11 +20,14 @@ Keep the SSH tunnel open in one PowerShell window. In another, inventory the Pi 
 ```powershell
 .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Inventory
 .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Connect -BusId 1-1.4
+.\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Persist
 ```
 
-USB devices have exclusive ownership. A PC only attaches a device after an operator selects it, which avoids one PC silently taking a keyboard, storage device, or device another PC is using. This release automates signed client installation; unattended multi-PC discovery, ownership leases, and automatic device claiming are not implemented yet.
+The final command saves selected imports for automatic reconnect by that PC. USB devices have exclusive ownership, so an operator still selects which PC gets each device. Unattended multi-PC discovery and ownership leases are not implemented yet.
 
 The broad goal is a wireless USB hub for devices such as flash drives, printers, and scanners. The validated HID/VHF bridge in this folder covers keyboards, mice, and the Xbox 360 gamepad. Arbitrary USB device passthrough is being evaluated on a separate USB/IP track; see [USBIP-ROADMAP.md](USBIP-ROADMAP.md). The Windows USB/IP client is maintained upstream; see [references/README.md](references/README.md).
+
+This repository does not yet have a project-wide license. The Microsoft VHF reference files include their MIT license, and the upstream USB/IP client is separately licensed by its maintainers. Public visibility does not grant reuse rights for the project-owned code.
 
 This experimental branch is being generalized from one keyboard to multiple USB HID interfaces. The Raspberry Pi reads USB HID interfaces from Linux `hidraw` and can translate standard Linux `evdev` gamepad events into a standard HID Game Pad report; Windows receives descriptors and reports over mutual TLS and asks the KMDF/VHF driver to create matching virtual HID devices. This is HID transport, not a general USB/IP implementation.
 
