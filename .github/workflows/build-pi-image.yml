@@ -1,0 +1,71 @@
+name: Build USBHub Raspberry Pi image
+
+on:
+  push:
+    tags:
+      - 'pi-image-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out USBHub
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install pi-gen build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y coreutils quilt parted qemu-user-static debootstrap zerofree zip \
+            dosfstools e2fsprogs libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc \
+            gpg pigz xxd arch-test bmap-tools kmod
+
+      - name: Prepare pinned pi-gen build
+        env:
+          PI_GEN_REV: d346cd53562b3c6b4f94c9155175f814258c456d
+        run: |
+          git clone https://github.com/RPi-Distro/pi-gen.git .pi-gen
+          git -C .pi-gen checkout "$PI_GEN_REV"
+          cp -a pi/image/stage2/05-usbhub-usbip .pi-gen/stage2/
+          chmod +x .pi-gen/stage2/05-usbhub-usbip/01-run.sh
+          touch .pi-gen/stage3/SKIP .pi-gen/stage4/SKIP .pi-gen/stage5/SKIP
+          touch .pi-gen/stage3/SKIP_IMAGES .pi-gen/stage4/SKIP_IMAGES .pi-gen/stage5/SKIP_IMAGES
+          cat > .pi-gen/config <<'EOF'
+          IMG_NAME='USBHub-rpios-lite-arm64'
+          PI_GEN_RELEASE='USBHub community image'
+          RELEASE='trixie'
+          ARCH='arm64'
+          ARCHIVE_FILENAME='USBHub-rpios-lite-arm64'
+          DEPLOY_COMPRESSION='xz'
+          COMPRESSION_LEVEL='3'
+          ENABLE_SSH=1
+          ENABLE_CLOUD_INIT=1
+          TARGET_HOSTNAME='usbhub'
+          EOF
+
+      - name: Build Raspberry Pi OS image
+        run: sudo ./.pi-gen/build.sh
+
+      - name: Check and checksum image
+        id: image
+        run: |
+          set -euo pipefail
+          image="$(find .pi-gen/deploy -maxdepth 1 -type f -name '*.img.xz' -print -quit)"
+          test -n "$image"
+          xz -t "$image"
+          (cd "$(dirname "$image")" && sha256sum "$(basename "$image")" > "$(basename "$image").sha256")
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          ls -lh "$image" "$image.sha256"
+
+      - name: Publish flash image release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.image.outputs.image }}" \
+            "${{ steps.image.outputs.image }}.sha256" \
+            --title "USBHub Raspberry Pi image $GITHUB_REF_NAME" \
+            --notes "Raspberry Pi OS Lite 64-bit image with the USBHub USB/IP server and storage guard. Use Raspberry Pi Imager to flash the .img.xz file and set unique first-boot account, Wi-Fi, and SSH options. See pi/image/README.md in the source repository for details and limitations."

@@ -25,6 +25,8 @@ Keep the SSH tunnel open in one PowerShell window. In another, claim a device fo
 
 The broad goal is a wireless USB hub for devices such as flash drives, printers, and scanners. The validated HID/VHF bridge in this folder covers keyboards, mice, and the Xbox 360 gamepad. Arbitrary USB device passthrough is being evaluated on a separate USB/IP track; see [USBIP-ROADMAP.md](USBIP-ROADMAP.md). The Windows USB/IP client is maintained upstream; see [references/README.md](references/README.md).
 
+To flash a fresh Raspberry Pi OS Lite image with the USB/IP host service and storage safety helper, see [the Pi image build and flashing guide](pi/image/README.md). The image is built for 64-bit Raspberry Pi OS and is currently targeted at the Zero 2 W; configure Wi-Fi, account, hostname, and SSH in Raspberry Pi Imager on first flash.
+
 This repository does not yet have a project-wide license. The Microsoft VHF reference files include their MIT license, and the upstream USB/IP client is separately licensed by its maintainers. Public visibility does not grant reuse rights for the project-owned code.
 
 This experimental branch is being generalized from one keyboard to multiple USB HID interfaces. The Raspberry Pi reads USB HID interfaces from Linux `hidraw` and can translate standard Linux `evdev` gamepad events into a standard HID Game Pad report; Windows receives descriptors and reports over mutual TLS and asks the KMDF/VHF driver to create matching virtual HID devices. This is HID transport, not a general USB/IP implementation.
