@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $0 list | bind BUS_ID | unbind BUS_ID" >&2
+    echo "Usage: $0 list | inventory | bind BUS_ID | unbind BUS_ID" >&2
     exit 2
 }
 
@@ -13,6 +13,34 @@ case "$action" in
     list)
         [[ $# -eq 1 ]] || usage
         exec usbip list --local
+        ;;
+    inventory)
+        [[ $# -eq 1 ]] || usage
+        for device in /sys/bus/usb/devices/*; do
+            bus_id="${device##*/}"
+            [[ "$bus_id" =~ ^[0-9]+-[0-9]+(\.[0-9]+)*$ ]] || continue
+            [[ -r "$device/idVendor" && -r "$device/idProduct" ]] || continue
+            vendor="$(<"$device/idVendor")"
+            product="$(<"$device/idProduct")"
+            classes=()
+            drivers=()
+            if [[ -r "$device/bDeviceClass" ]]; then
+                classes+=("$(<"$device/bDeviceClass")")
+            fi
+            if [[ -L "$device/driver" ]]; then
+                drivers+=("$(basename "$(readlink -f "$device/driver")")")
+            fi
+            for interface in "$device":*; do
+                [[ -r "$interface/bInterfaceClass" ]] || continue
+                classes+=("$(<"$interface/bInterfaceClass")")
+                if [[ -L "$interface/driver" ]]; then
+                    drivers+=("$(basename "$(readlink -f "$interface/driver")")")
+                fi
+            done
+            class_list="$(printf '%s\n' "${classes[@]}" | sort -u | paste -sd, -)"
+            driver_list="$(printf '%s\n' "${drivers[@]}" | sort -u | paste -sd, -)"
+            printf '%s\t%s:%s\t%s\t%s\n' "$bus_id" "$vendor" "$product" "$class_list" "$driver_list"
+        done
         ;;
     bind|unbind)
         [[ $# -eq 2 ]] || usage

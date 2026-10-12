@@ -9,7 +9,7 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Tunnel', 'Inventory', 'List', 'Ports', 'SetupPi', 'Claim', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')]
+    [ValidateSet('Tunnel', 'Inventory', 'List', 'Ports', 'SetupPi', 'Claim', 'Auto', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')]
     [string] $Action,
     [string] $PiAddress,
     [string] $PiUser,
@@ -58,6 +58,15 @@ function Assert-UsbIpClient {
     if (-not $script:usbip) { throw 'usbip.exe was not found. Run windows/UsbIp/Install-UsbHubClient.ps1 first.' }
 }
 
+function Get-SshIdentityArguments {
+    $keySuffix = $script:PiAddress -replace '[^A-Za-z0-9.-]', '_'
+    $identityFile = Join-Path $env:USERPROFILE ".ssh\usbhub_${keySuffix}_ed25519"
+    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
+        return @('-o', "IdentityFile=$identityFile")
+    }
+    return @()
+}
+
 function Invoke-PiHelper {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('bind', 'unbind')][string] $Verb,
@@ -66,7 +75,8 @@ function Invoke-PiHelper {
     Assert-SshClient
     if ($TargetBusId -notmatch '^[0-9]+-[0-9]+(\.[0-9]+)*$') { throw "Invalid USB bus ID: $TargetBusId" }
     # A TTY lets sudo request the Pi account password when needed.
-    & $script:ssh.Source -t "$script:PiUser@$script:PiAddress" "sudo $script:remoteHelper $Verb $TargetBusId"
+    $sshArgs = @('-t') + (Get-SshIdentityArguments) + @("$script:PiUser@$script:PiAddress", "sudo $script:remoteHelper $Verb $TargetBusId")
+    & $script:ssh.Source @sshArgs
     if ($LASTEXITCODE -ne 0) { throw "Pi USB/IP $Verb failed with exit code $LASTEXITCODE." }
 }
 
@@ -85,11 +95,75 @@ function Get-PortBusId {
     throw "Imported USB/IP port $ImportedPort was not found. Run -Action Ports."
 }
 
+function Write-AutoLog {
+    param([string] $Message)
+    $logPath = Join-Path $env:LOCALAPPDATA 'UsbHub\auto-claim.log'
+    "$(Get-Date -Format o) $Message" | Add-Content -LiteralPath $logPath
+}
+
+function Add-AutoClaimSuppression {
+    param([Parameter(Mandatory = $true)][string] $TargetBusId)
+    $path = Join-Path $env:LOCALAPPDATA 'UsbHub\auto-claim-suppress.txt'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { New-Item -ItemType File -Path $path -Force | Out-Null }
+    $existing = @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)
+    if ($TargetBusId -notin $existing) { Add-Content -LiteralPath $path -Value $TargetBusId }
+}
+
+function Get-AutoClaimCandidates {
+    Assert-PiTarget
+    Assert-SshClient
+    $keySuffix = $script:PiAddress -replace '[^A-Za-z0-9.-]', '_'
+    $identityFile = Join-Path $env:USERPROFILE ".ssh\usbhub_${keySuffix}_ed25519"
+    $sshArgs = @('-o', 'BatchMode=yes')
+    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
+        $sshArgs += @('-o', "IdentityFile=$identityFile")
+    }
+    $sshArgs += @("$script:PiUser@$script:PiAddress", "$script:remoteHelper inventory")
+    $lines = @(& $script:ssh.Source @sshArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Pi auto-inventory failed: $($lines -join ' ')"
+    }
+    foreach ($line in $lines) {
+        $match = [regex]::Match([string]$line, '^([0-9]+-[0-9]+(?:\.[0-9]+)*)\t([0-9A-Fa-f]{4}:[0-9A-Fa-f]{4})\t([0-9A-Fa-f]{2}(?:,[0-9A-Fa-f]{2})*)\t([A-Za-z0-9_.-]*(?:,[A-Za-z0-9_.-]+)*)$')
+        if (-not $match.Success) { continue }
+        $classes = @($match.Groups[3].Value.Split(',') | ForEach-Object { $_.ToLowerInvariant() })
+        # HID remains on the Pi's VHF bridge; hubs, network interfaces, and
+        # webcams are excluded from unattended USB/IP ownership changes.
+        $eligible = -not [bool]($classes | Where-Object { $_ -in @('03', '09', '02', '0a', '0e') })
+        $drivers = @($match.Groups[4].Value.Split(',') | ForEach-Object { $_.ToLowerInvariant() })
+        if ($drivers | Where-Object { $_ -in @('xpad', 'usbhid', 'hid-generic', 'hid-multitouch', 'usbip-host') }) { $eligible = $false }
+        [pscustomobject]@{
+            BusId = $match.Groups[1].Value
+            VidPid = $match.Groups[2].Value.ToUpperInvariant()
+            Classes = $classes -join ','
+            Drivers = $drivers -join ','
+            Eligible = $eligible
+        }
+    }
+}
+
+function Invoke-AutoPiHelper {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('bind', 'unbind')][string] $Verb,
+        [Parameter(Mandatory = $true)][string] $TargetBusId
+    )
+    $keySuffix = $script:PiAddress -replace '[^A-Za-z0-9.-]', '_'
+    $identityFile = Join-Path $env:USERPROFILE ".ssh\usbhub_${keySuffix}_ed25519"
+    $sshArgs = @('-o', 'BatchMode=yes')
+    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
+        $sshArgs += @('-o', "IdentityFile=$identityFile")
+    }
+    $sshArgs += @("$script:PiUser@$script:PiAddress", "sudo -n $script:remoteHelper $Verb $TargetBusId")
+    $output = @(& $script:ssh.Source @sshArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "Pi $Verb failed for $TargetBusId`: $($output -join ' ')" }
+}
+
 if ($Action -eq 'Inventory') {
     Assert-PiTarget
     Assert-SshClient
     Write-Host "USB devices on $PiUser@$PiAddress (read-only):"
-    & $ssh.Source "$PiUser@$PiAddress" '/usr/sbin/usbip list --local'
+    $sshArgs = (Get-SshIdentityArguments) + @("$PiUser@$PiAddress", '/usr/sbin/usbip list --local')
+    & $ssh.Source @sshArgs
     if ($LASTEXITCODE -ne 0) { throw "Pi inventory failed with exit code $LASTEXITCODE." }
     exit 0
 }
@@ -98,7 +172,8 @@ if ($Action -eq 'Tunnel') {
     Assert-PiTarget
     Assert-SshClient
     Write-Host ('Opening SSH tunnel localhost:3240 to ' + $PiAddress + ':3240. Keep this window open; Ctrl+C closes it.')
-    & $ssh.Source -N -L '3240:127.0.0.1:3240' "$PiUser@$PiAddress"
+    $sshArgs = @('-N', '-L', '3240:127.0.0.1:3240') + (Get-SshIdentityArguments) + @("$PiUser@$PiAddress")
+    & $ssh.Source @sshArgs
     exit $LASTEXITCODE
 }
 
@@ -109,15 +184,80 @@ if ($Action -eq 'SetupPi') {
     if (-not (Test-Path -LiteralPath $piHelper -PathType Leaf)) { throw "Pi safety helper not found: $piHelper" }
     $remoteTemp = '/tmp/manage-usbhub-usbip.sh'
     $remoteSpec = $PiUser + '@' + $PiAddress + ':' + $remoteTemp
-    & $scp.Source $piHelper $remoteSpec
+    $scpArgs = (Get-SshIdentityArguments) + @($piHelper, $remoteSpec)
+    & $scp.Source @scpArgs
     if ($LASTEXITCODE -ne 0) { throw "Could not copy the Pi helper (exit $LASTEXITCODE)." }
-    & $ssh.Source -t "$PiUser@$PiAddress" "sudo install -o root -g root -m 0755 $remoteTemp $remoteHelper && rm -f $remoteTemp"
+    if ($PiUser -notmatch '^[A-Za-z_][A-Za-z0-9_-]*\$?$') { throw 'Pi SSH user must be a simple Linux account name to configure the scoped USB/IP rule.' }
+    $sudoersRule = "$PiUser ALL=(root) NOPASSWD: $remoteHelper bind *, $remoteHelper unbind *`n"
+    $sudoersBase64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($sudoersRule))
+    $setupCommand = "sudo install -o root -g root -m 0755 $remoteTemp $remoteHelper && rm -f $remoteTemp && printf '%s' '$sudoersBase64' | base64 -d > /tmp/usbhub-usbip.sudoers && sudo visudo -cf /tmp/usbhub-usbip.sudoers && sudo install -o root -g root -m 0440 /tmp/usbhub-usbip.sudoers /etc/sudoers.d/usbhub-usbip && rm -f /tmp/usbhub-usbip.sudoers && sudo visudo -cf /etc/sudoers.d/usbhub-usbip"
+    $sshArgs = @('-t') + (Get-SshIdentityArguments) + @("$PiUser@$PiAddress", $setupCommand)
+    & $ssh.Source @sshArgs
     if ($LASTEXITCODE -ne 0) { throw "Could not install the Pi helper (exit $LASTEXITCODE)." }
-    Write-Host "Installed the mounted-storage protection helper at $remoteHelper."
+    Write-Host "Installed the mounted-storage safety helper and scoped unattended bind permission on the Pi."
     exit 0
 }
 
-if ($Action -in @('List', 'Ports', 'Claim', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')) { Assert-UsbIpClient }
+if ($Action -in @('List', 'Ports', 'Claim', 'Auto', 'Connect', 'Attach', 'Disconnect', 'Release', 'Persist')) { Assert-UsbIpClient }
+
+if ($Action -eq 'Auto') {
+    Assert-PiTarget
+    Assert-SshClient
+    Assert-UsbIpClient
+    $mutexName = 'Local\UsbHubAutoClaim'
+    $mutex = [Threading.Mutex]::new($false, $mutexName)
+    if (-not $mutex.WaitOne(0)) { Write-AutoLog 'Another auto-claim process is already running; exiting.'; exit 0 }
+    Write-AutoLog "Automatic claiming started for $PiUser@$PiAddress. First PC to bind an eligible device owns it."
+    try {
+        while ($true) {
+            try {
+                if (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 3240 -InformationLevel Quiet -WarningAction SilentlyContinue)) {
+                    Start-Sleep -Seconds 5
+                    continue
+                }
+                $portOutput = (& $usbip port 2>&1 | Out-String)
+                if ($LASTEXITCODE -ne 0) { throw "Could not inspect current USB/IP imports: $portOutput" }
+                $attached = @([regex]::Matches($portOutput, 'usbip://[^/\s]+/([0-9]+-[0-9]+(?:\.[0-9]+)*)') | ForEach-Object { $_.Groups[1].Value })
+                $candidates = @(Get-AutoClaimCandidates)
+                $present = @($candidates | ForEach-Object { $_.BusId })
+                $suppressionPath = Join-Path $env:LOCALAPPDATA 'UsbHub\auto-claim-suppress.txt'
+                $suppressed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                if (Test-Path -LiteralPath $suppressionPath -PathType Leaf) {
+                    foreach ($suppressedBusId in @(Get-Content -LiteralPath $suppressionPath)) {
+                        if ($suppressedBusId -in $present) { [void]$suppressed.Add($suppressedBusId) }
+                    }
+                    Set-Content -LiteralPath $suppressionPath -Value @($suppressed | Sort-Object) -ErrorAction SilentlyContinue
+                }
+                foreach ($candidate in $candidates) {
+                    if (-not $candidate.Eligible -or $candidate.BusId -in $suppressed) { continue }
+                    if ($candidate.BusId -in $attached) { continue }
+                    try {
+                        Invoke-AutoPiHelper -Verb bind -TargetBusId $candidate.BusId
+                        $attachOutput = @(& $usbip attach -r $Server -b $candidate.BusId 2>&1)
+                        if ($LASTEXITCODE -ne 0) {
+                            Invoke-AutoPiHelper -Verb unbind -TargetBusId $candidate.BusId
+                            Write-AutoLog "Attach failed for $($candidate.BusId) $($candidate.VidPid): $($attachOutput -join ' ')"
+                            continue
+                        }
+                        Write-AutoLog "Claimed $($candidate.BusId) $($candidate.VidPid) (classes $($candidate.Classes); drivers $($candidate.Drivers))."
+                        $attached += $candidate.BusId
+                    }
+                    catch {
+                        # Another PC may have won the exclusive bind race, or a
+                        # storage device may be mounted on the Pi. Retry later.
+                        Write-AutoLog "Skipped $($candidate.BusId) $($candidate.VidPid): $($_.Exception.Message)"
+                    }
+                }
+            }
+            catch { Write-AutoLog "Scan failed: $($_.Exception.Message)" }
+            Start-Sleep -Seconds 10
+        }
+    }
+    finally {
+        $mutex.ReleaseMutex()
+        $mutex.Dispose()
+    }
+}
 
 if ($Action -eq 'Claim') {
     Assert-PiTarget
@@ -203,6 +343,7 @@ switch ($Action) {
         $TargetBusId = Get-PortBusId -ImportedPort $Port
         Write-Warning 'For storage, use Windows Safely Remove Hardware and close files before disconnecting.'
         if ($PSCmdlet.ShouldProcess("USB/IP port $Port ($TargetBusId)", 'Disconnect and return device to the Pi')) {
+            Add-AutoClaimSuppression -TargetBusId $TargetBusId
             & $usbip detach -p $Port
             if ($LASTEXITCODE -ne 0) { throw "USB/IP detach failed with exit code $LASTEXITCODE; export remains bound." }
             Invoke-PiHelper -Verb unbind -TargetBusId $TargetBusId
@@ -214,6 +355,7 @@ switch ($Action) {
         $ports = & $usbip port 2>&1 | Out-String
         if ($ports -match [regex]::Escape("/$BusId")) { throw "Device $BusId is still attached. Disconnect it from Windows first." }
         if ($PSCmdlet.ShouldProcess("Pi USB device $BusId", 'Unbind and return it to the Pi')) {
+            Add-AutoClaimSuppression -TargetBusId $BusId
             Invoke-PiHelper -Verb unbind -TargetBusId $BusId
         }
     }

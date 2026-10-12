@@ -16,7 +16,7 @@ The image build targets 64-bit Raspberry Pi OS Lite and is intended first for Ra
 2. Verify the image against the checksum before flashing. On Linux/macOS, run `sha256sum -c <image-filename>.sha256` in the download folder. On Windows, run `Get-FileHash -Algorithm SHA256 .\<image-filename>` and compare its hash with the digest in the downloaded `.sha256` file.
 3. In Raspberry Pi Imager, choose **Use custom** and select the `.img.xz` file. Choose the destination SD card, then configure a unique hostname, username/password, Wi-Fi country/network, and SSH access.
 4. Boot the Pi and connect to it over SSH. USB/IP server startup is automatic. TCP port 3240 is accepted only on loopback, so Windows clients must tunnel it over SSH.
-5. On each Windows PC, install the USB/IP client once with the project bootstrap, keep the SSH tunnel open, then use `Invoke-UsbHubUsbIp.ps1 -Action Claim` to request a device.
+5. On each Windows PC, run the project bootstrap once. It installs the Windows USB/IP driver with administrator approval, then configures the SSH key, Pi-side storage guard, and automatic client. Eligible devices are claimed by the first configured PC that binds them; see [the Windows USB/IP workflow](../../windows/UsbIp/README.md).
 
 The bundled image includes the device-class-agnostic USB/IP transport. Windows still needs its upstream USB/IP kernel client installed once per PC with administrator approval. The Windows class driver handles an attached USB device. Device compatibility depends on the device's transfer types and the Wi-Fi/network; webcam isochronous streaming is not a supported validation target.
 

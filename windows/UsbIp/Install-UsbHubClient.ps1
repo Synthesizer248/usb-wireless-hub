@@ -188,11 +188,12 @@ $stopScript = Join-Path $installedUsbIpDir 'Stop-UsbHubTunnel.ps1'
 $stopSource = @'
 param(
     [Parameter(Mandatory = $true)][string] $TunnelScript,
+    [Parameter(Mandatory = $true)][string] $AutoScript,
     [Parameter(Mandatory = $true)][string] $IdentityFile
 )
 $ErrorActionPreference = 'SilentlyContinue'
 $runners = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
-    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($TunnelScript) })
+    Where-Object { $_.CommandLine -and ($_.CommandLine.Contains($TunnelScript) -or ($_.CommandLine.Contains($AutoScript) -and $_.CommandLine.Contains('-Action Auto'))) })
 $runners | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-Sleep -Seconds 1
 $sshProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
@@ -203,6 +204,15 @@ Write-Host 'USBHub SSH tunnel stopped for this Windows session.'
 Set-Content -LiteralPath $stopScript -Value $stopSource -Encoding UTF8
 
 $claimScript = Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'
+$autoShortcutPath = Join-Path $startupDir 'USBHub Auto Connect.lnk'
+$autoShortcut = $shell.CreateShortcut($autoShortcutPath)
+$autoShortcut.TargetPath = $powershellExe
+$autoShortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$claimScript`" -Action Auto -PiAddress `"$PiAddress`" -PiUser `"$PiUser`""
+$autoShortcut.WorkingDirectory = $installedUsbIpDir
+$autoShortcut.Description = 'Automatically claims eligible USB devices for the first available USBHub PC.'
+$autoShortcut.WindowStyle = 7
+$autoShortcut.Save()
+
 $desktop = [Environment]::GetFolderPath('Desktop')
 $shortcutPath = Join-Path $desktop 'Claim USBHub Device.lnk'
 $shortcut = $shell.CreateShortcut($shortcutPath)
@@ -214,15 +224,20 @@ $shortcut.Save()
 $stopShortcutPath = Join-Path $desktop 'Stop USBHub Tunnel.lnk'
 $stopShortcut = $shell.CreateShortcut($stopShortcutPath)
 $stopShortcut.TargetPath = $powershellExe
-$stopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$stopScript`" -TunnelScript `"$tunnelScript`" -IdentityFile `"$keyPath`""
+$stopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$stopScript`" -TunnelScript `"$tunnelScript`" -AutoScript `"$claimScript`" -IdentityFile `"$keyPath`""
 $stopShortcut.WorkingDirectory = $installedUsbIpDir
 $stopShortcut.Description = 'Stops the USBHub SSH tunnel until the next Windows sign-in.'
 $stopShortcut.Save()
 
-& $powershellExe -NoProfile -ExecutionPolicy Bypass -File $stopScript -TunnelScript $tunnelScript -IdentityFile $keyPath
-Start-Process -FilePath $powershellExe -ArgumentList $startupShortcut.Arguments -WindowStyle Hidden
+Write-Host 'Configuring the Pi safety helper and unattended USB/IP permission (enter the Pi sudo password if requested)...'
+& $powershellExe -NoProfile -ExecutionPolicy Bypass -File $claimScript -Action SetupPi -PiAddress $PiAddress -PiUser $PiUser
+if ($LASTEXITCODE -ne 0) { throw 'Could not configure the Pi USB/IP safety helper; automatic claiming was not started.' }
 
-Write-Host 'The SSH tunnel starts automatically at Windows sign-in.'
-Write-Host "Use the desktop shortcut '$shortcutPath' to request a device claim."
+& $powershellExe -NoProfile -ExecutionPolicy Bypass -File $stopScript -TunnelScript $tunnelScript -AutoScript $claimScript -IdentityFile $keyPath
+Start-Process -FilePath $powershellExe -ArgumentList $startupShortcut.Arguments -WindowStyle Hidden
+Start-Process -FilePath $powershellExe -ArgumentList $autoShortcut.Arguments -WindowStyle Hidden
+
+Write-Host 'The SSH tunnel and automatic USB device claiming start at Windows sign-in.'
+Write-Host "USBHub Auto Connect claims eligible devices for the first PC to win the Pi bind race."
+Write-Host "Use the desktop shortcut '$shortcutPath' only when you want to choose a device manually."
 Write-Host "Use '$stopShortcutPath' to stop the tunnel for the current session."
-Write-Host 'A PC still has to request ownership; USB devices are exclusive and are not automatically assigned to every connected PC.'

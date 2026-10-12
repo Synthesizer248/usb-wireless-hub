@@ -9,9 +9,9 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress 192.168.1.100
 ```
 
-The bootstrap downloads the pinned USBip release from its upstream GitHub release, checks the SHA-256 digest and Authenticode signature, then opens the vendor installer with a UAC prompt. The installer may briefly restart USB hubs; save work and pause USB transfers first. Windows administrator approval is required to install a kernel driver. The Pi address is saved per Windows account so later commands do not need it repeated.
+The bootstrap downloads the pinned USBip release from its upstream GitHub release, checks the SHA-256 digest and Authenticode signature, then opens the vendor installer with a UAC prompt. The installer may briefly restart USB hubs; save work and pause USB transfers first. Windows administrator approval is required to install a kernel driver. The Pi address is saved per Windows account so later commands do not need it repeated. It also installs the Pi-side storage guard and a narrowly scoped sudo rule for automatic claims.
 
-Keep the SSH tunnel open in one PowerShell window. In another, claim a device for this PC:
+The installer keeps the SSH tunnel open and automatically claims eligible devices after Windows sign-in. When multiple PCs are configured, the first successful Pi-side bind owns the device. To choose a particular device manually, run:
 
 ```powershell
 .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Tunnel

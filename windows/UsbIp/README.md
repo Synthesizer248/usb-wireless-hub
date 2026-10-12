@@ -9,9 +9,9 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress 192.168.1.100
 ```
 
-The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-256 digest and Authenticode signature, and starts the official interactive setup with UAC. Save work first: setup can restart USB hubs. Administrator approval and any restart requested by the upstream installer are still required; Windows does not allow a normal user script to silently install kernel drivers. The Pi address is stored in `%LOCALAPPDATA%\UsbHub\client.json` for this Windows account. The script then installs a dedicated SSH key on the Pi, copies the client scripts into `%LOCALAPPDATA%\UsbHub\client`, creates a Startup-folder shortcut that keeps the tunnel open at Windows sign-in, and adds **Claim USBHub Device** and **Stop USBHub Tunnel** desktop shortcuts. The Pi account password is requested once while authorizing the key.
+The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-256 digest and Authenticode signature, and starts the official interactive setup with UAC. Save work first: setup can restart USB hubs. Administrator approval and any restart requested by the upstream installer are still required; Windows does not allow a normal user script to silently install kernel drivers. The Pi address is stored in `%LOCALAPPDATA%\UsbHub\client.json` for this Windows account. The script then installs a dedicated SSH key on the Pi, copies the client scripts into `%LOCALAPPDATA%\UsbHub\client`, installs the Pi safety helper and its narrowly scoped sudo rule, and creates Startup shortcuts for the SSH tunnel and automatic claiming. The Pi account password is requested while authorizing the key; the Pi sudo password is requested once to install the helper and rule. Desktop shortcuts for **Claim USBHub Device** (manual override) and **Stop USBHub Tunnel** are also added.
 
-The first setup must also install the Pi-side storage safety helper if it is not already present:
+The bootstrap installs the Pi-side storage guard and its scoped automatic bind permission. If setting up only the client scripts manually, install them with:
 
 ```powershell
 .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action SetupPi
@@ -32,9 +32,11 @@ This copies pi/usbip/manage-usbhub-usbip.sh to /usr/local/sbin/manage-usbhub-usb
 
 ## Use after setup
 
-After signing in to Windows, the tunnel runs automatically in the background. Plugging a device into the Pi does not silently assign it to a PC; ownership remains exclusive. On the PC that should receive the device, double-click **Claim USBHub Device** and choose it from the list. Windows then loads its normal device-class driver.
+After signing in to Windows, the tunnel and auto-claim monitor run in the background. When a supported device is plugged into the Pi, each configured PC checks for it; the first PC whose Pi-side bind succeeds gets exclusive ownership, and Windows loads its normal class driver. Other PCs skip the already-claimed device. If several PCs start together, whichever wins the USB/IP bind race owns the device. For deterministic ownership, enable automatic claiming on only the intended PC and use manual **Claim USBHub Device** on others.
 
-The shortcuts use the installed copy of the client scripts, so the repository folder can be moved or removed after setup. To restart the tunnel manually, double-click **Stop USBHub Tunnel**, then double-click **USBHub SSH Tunnel** in the Startup folder or sign out and back in.
+Automatic claiming excludes HID devices and devices bound to the Pi's HID/gamepad drivers (the Pi's HID/VHF bridge handles those), USB hubs, network adapters, and webcams. It attempts other USB classes, including mass-storage devices; the Pi helper refuses a storage device that is mounted on the Pi. USB/IP compatibility still varies by device class and transfer type. The manual Claim shortcut remains available for devices that need an explicit selection.
+
+The shortcuts use the installed copy of the client scripts, so the repository folder can be moved or removed after setup. **Stop USBHub Tunnel** stops both the automatic scanner and SSH tunnel for the current session; they start again at the next Windows sign-in.
 
 For command-line inventory and ownership, run the installed client script:
 
@@ -71,5 +73,5 @@ The command asks for confirmation, detaches from Windows, then unbinds the devic
 - Xbox 360 USB/IP attach and input have passed on the development PC with the rebuilt Pi USB/IP host modules. This confirms the basic attach path; it does not prove every device class.
 - A SanDisk flash drive was exported and mounted by Windows as a FAT32 volume with drive letter F: on the development PC. Other drives and filesystems still need validation. Do not initialize or format a disk if Windows prompts.
 - Printer and scanner compatibility still needs device-by-device testing.
-- The current PC must explicitly claim a device from the desktop shortcut. Zero-touch auto-claim across multiple PCs is not enabled because it would give one PC ownership without a user request and cause ownership races. The SSH tunnel starts automatically at sign-in and retries after connection loss.
+- Auto-claim uses first successful Pi-side bind as its ownership rule. Multiple PCs can race for a newly attached device; only one can win. To avoid accidental assignment, leave auto-claim enabled on the intended PC and use manual Claim on other PCs.
 - The task is registered for the current Windows user. Windows kernel client installation still requires one-time administrator approval; the installer may request a restart.
