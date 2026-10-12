@@ -141,7 +141,7 @@ finally {
     $ErrorActionPreference = $savedErrorPreference
 }
 if ($keyAuthExitCode -ne 0) {
-    Write-Host 'Authorize this PC’s public SSH key on the Pi. Enter the Pi account password when prompted.'
+    Write-Host "Authorize this PC's public SSH key on the Pi. Enter the Pi account password when prompted."
     & $sshClient.Source -o PreferredAuthentications=password -o PubkeyAuthentication=no "$PiUser@$PiAddress" $remoteKeyInstall
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the SSH public key on the Pi; the automatic tunnel was not configured.' }
 }
