@@ -154,20 +154,12 @@ function Invoke-AutoPiHelper {
         $sshArgs += @('-o', "IdentityFile=$identityFile")
     }
     $sshArgs += @("$script:PiUser@$script:PiAddress", "sudo -n $script:remoteHelper $Verb $TargetBusId")
-    # usbip writes its normal "bind complete" status to stderr. Keep that
-    # diagnostic text without allowing PowerShell to treat a successful bind
-    # as an exception and skip the subsequent Windows attach.
-    $stderrFile = [IO.Path]::GetTempFileName()
-    try {
-        $stdout = @(& $script:ssh.Source @sshArgs 2> $stderrFile)
-        $exitCode = $LASTEXITCODE
-        $stderr = @(Get-Content -LiteralPath $stderrFile -ErrorAction SilentlyContinue)
-    }
-    finally {
-        Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
-    }
-    $output = @($stdout + $stderr)
-    if ($exitCode -ne 0) { throw "Pi $Verb failed for $TargetBusId`: $($output -join ' ')" }
+    # usbip writes a successful "bind complete" status to stderr. Windows
+    # PowerShell turns that status into a NativeCommandError when it is
+    # captured, so discard routine output and rely on the process exit code.
+    & $script:ssh.Source @sshArgs 2>$null | Out-Null
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) { throw "Pi $Verb failed for $TargetBusId (exit $exitCode)." }
 }
 
 if ($Action -eq 'Inventory') {
