@@ -183,12 +183,21 @@ function Invoke-AutoPiHelper {
         $sshArgs += @('-o', "IdentityFile=$identityFile")
     }
     $sshArgs += @("$script:PiUser@$script:PiAddress", "sudo -n $script:remoteHelper $Verb $TargetBusId")
-    # usbip writes a successful "bind complete" status to stderr. Windows
-    # PowerShell turns that status into a NativeCommandError when it is
-    # captured, so discard routine output and rely on the process exit code.
-    & $script:ssh.Source @sshArgs 2>$null | Out-Null
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) { throw "Pi $Verb failed for $TargetBusId (exit $exitCode)." }
+    # usbip writes a successful "bind complete" diagnostic to stderr. In
+    # Windows PowerShell, ErrorActionPreference=Stop can turn that diagnostic
+    # into a terminating NativeCommandError even though ssh returned success.
+    # Capture it while temporarily allowing native diagnostics, then make the
+    # exit code the single source of success or failure.
+    $savedErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& $script:ssh.Source @sshArgs 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($exitCode -ne 0) { throw "Pi $Verb failed for $TargetBusId (exit $exitCode): $($output -join ' ')" }
 }
 
 if ($Action -eq 'Inventory') {
@@ -266,6 +275,9 @@ if ($Action -eq 'Auto') {
                         }
                         Write-AutoLog "Claimed $($candidate.BusId) $($candidate.VidPid) (classes $($candidate.Classes); drivers $($candidate.Drivers))."
                         $attached += $candidate.BusId
+                        # Give Windows time to enumerate the storage stack and
+                        # assign a mount point before exporting another device.
+                        Start-Sleep -Seconds 8
                     }
                     catch {
                         # Another PC may have won the exclusive bind race, or a
