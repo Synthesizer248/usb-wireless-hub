@@ -157,7 +157,7 @@ function Invoke-AutoPiHelper {
     # usbip writes its normal "bind complete" status to stderr. Keep that
     # diagnostic text without allowing PowerShell to treat a successful bind
     # as an exception and skip the subsequent Windows attach.
-    $stderrFile = New-TemporaryFile
+    $stderrFile = [IO.Path]::GetTempFileName()
     try {
         $stdout = @(& $script:ssh.Source @sshArgs 2> $stderrFile)
         $exitCode = $LASTEXITCODE
