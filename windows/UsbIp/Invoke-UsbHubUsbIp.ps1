@@ -104,9 +104,38 @@ function Write-AutoLog {
 function Add-AutoClaimSuppression {
     param([Parameter(Mandatory = $true)][string] $TargetBusId)
     $path = Join-Path $env:LOCALAPPDATA 'UsbHub\auto-claim-suppress.txt'
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { New-Item -ItemType File -Path $path -Force | Out-Null }
-    $existing = @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)
-    if ($TargetBusId -notin $existing) { Add-Content -LiteralPath $path -Value $TargetBusId }
+    $now = [DateTime]::UtcNow
+    $expiry = $now.AddMinutes(2)
+    $retained = [Collections.Generic.List[string]]::new()
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        foreach ($entry in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
+            $columns = ([string]$entry) -split "`t", 2
+            if ($columns.Count -ne 2 -or $columns[0] -eq $TargetBusId) { continue }
+            try { $existingExpiry = [DateTime]::new([Int64]$columns[1], [DateTimeKind]::Utc) } catch { continue }
+            if ($existingExpiry -gt $now) { $retained.Add("$($columns[0])`t$($existingExpiry.Ticks)") }
+        }
+    }
+    $retained.Add("$TargetBusId`t$($expiry.Ticks)")
+    Set-Content -LiteralPath $path -Value $retained -Encoding UTF8
+}
+
+function Get-AutoClaimSuppressions {
+    $path = Join-Path $env:LOCALAPPDATA 'UsbHub\auto-claim-suppress.txt'
+    $suppressed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $suppressed }
+
+    $now = [DateTime]::UtcNow
+    $retained = [Collections.Generic.List[string]]::new()
+    foreach ($entry in @(Get-Content -LiteralPath $path -ErrorAction SilentlyContinue)) {
+        $columns = ([string]$entry) -split "`t", 2
+        if ($columns.Count -ne 2) { continue }
+        try { $expiry = [DateTime]::new([Int64]$columns[1], [DateTimeKind]::Utc) } catch { continue }
+        if ($expiry -le $now) { continue }
+        [void]$suppressed.Add($columns[0])
+        $retained.Add("$($columns[0])`t$($expiry.Ticks)")
+    }
+    Set-Content -LiteralPath $path -Value $retained -Encoding UTF8
+    return $suppressed
 }
 
 function Get-AutoClaimCandidates {
@@ -223,15 +252,7 @@ if ($Action -eq 'Auto') {
                 if ($LASTEXITCODE -ne 0) { throw "Could not inspect current USB/IP imports: $portOutput" }
                 $attached = @([regex]::Matches($portOutput, 'usbip://[^/\s]+/([0-9]+-[0-9]+(?:\.[0-9]+)*)') | ForEach-Object { $_.Groups[1].Value })
                 $candidates = @(Get-AutoClaimCandidates)
-                $present = @($candidates | ForEach-Object { $_.BusId })
-                $suppressionPath = Join-Path $env:LOCALAPPDATA 'UsbHub\auto-claim-suppress.txt'
-                $suppressed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-                if (Test-Path -LiteralPath $suppressionPath -PathType Leaf) {
-                    foreach ($suppressedBusId in @(Get-Content -LiteralPath $suppressionPath)) {
-                        if ($suppressedBusId -in $present) { [void]$suppressed.Add($suppressedBusId) }
-                    }
-                    Set-Content -LiteralPath $suppressionPath -Value @($suppressed | Sort-Object) -ErrorAction SilentlyContinue
-                }
+                $suppressed = Get-AutoClaimSuppressions
                 foreach ($candidate in $candidates) {
                     if (-not $candidate.Eligible -or $candidate.BusId -in $suppressed) { continue }
                     if ($candidate.BusId -in $attached) { continue }
