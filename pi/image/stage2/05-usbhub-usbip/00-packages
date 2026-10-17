@@ -1,1 +1,1 @@
-usbip nftables avahi-daemon avahi-utils libnss-mdns cockpit cockpit-networkmanager
+usbip nftables avahi-daemon avahi-utils libnss-mdns cockpit cockpit-system cockpit-networkmanager

@@ -28,7 +28,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
 	avahi-daemon avahi-utils libnss-mdns \
-	cockpit cockpit-networkmanager
+	cockpit cockpit-system cockpit-networkmanager
 
 systemctl enable --now avahi-daemon.service cockpit.socket
 systemctl restart avahi-daemon.service

@@ -102,4 +102,4 @@ jobs:
             "${{ steps.image.outputs.image }}" \
             "${{ steps.image.outputs.image }}.sha256" \
             --title "USBHub Raspberry Pi image $GITHUB_REF_NAME" \
-            --notes "Raspberry Pi OS Lite 64-bit image with the USBHub USB/IP server and storage guard. Use Raspberry Pi Imager to flash the .img.xz file and set unique first-boot account, Wi-Fi, and SSH options. See pi/image/README.md in the source repository for details and limitations."
+            --notes "Raspberry Pi OS Lite 64-bit image with the USBHub USB/IP server and storage guard. Use Raspberry Pi Imager to flash the .img.xz file and set unique first-boot account, temporary password, Wi-Fi, and SSH options. The first Cockpit login requires changing the temporary password; later password changes are available from Cockpit Accounts. See pi/image/README.md in the source repository for details and limitations."
