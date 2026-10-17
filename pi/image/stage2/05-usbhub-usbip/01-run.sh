@@ -14,4 +14,6 @@ done
 
 on_chroot <<- EOF
 	systemctl enable usbhub-usbipd.service
+	systemctl enable avahi-daemon.service
+	systemctl enable cockpit.socket
 EOF

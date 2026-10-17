@@ -27,6 +27,10 @@ The broad goal is a wireless USB hub for devices such as flash drives, printers,
 
 To flash a fresh Raspberry Pi OS Lite image with the USB/IP host service and storage safety helper, see [the Pi image build and flashing guide](pi/image/README.md). The image is built for 64-bit Raspberry Pi OS and is currently targeted at the Zero 2 W; configure Wi-Fi, account, hostname, and SSH in Raspberry Pi Imager on first flash.
 
+## Pi web admin console
+
+The flash image includes Cockpit and Avahi. From a phone or laptop on the same LAN, open `https://<Pi-hostname>.local:9090` (for example, `https://usbwirelesshub.local:9090`) and sign in with the Pi's Linux account. Cockpit provides a browser terminal and, through its NetworkManager component, Wi-Fi SSID/password management. The first visit uses a self-signed HTTPS certificate and may show a browser warning. Changing the active Wi-Fi connection can interrupt the console until the Pi reconnects. For an existing Pi, run `sudo bash pi/admin/Install-UsbHubAdminConsole.sh usbwirelesshub` from the repository to install it and set a unique mDNS hostname.
+
 This repository does not yet have a project-wide license. The Microsoft VHF reference files include their MIT license, and the upstream USB/IP client is separately licensed by its maintainers. Public visibility does not grant reuse rights for the project-owned code.
 
 This experimental branch is being generalized from one keyboard to multiple USB HID interfaces. The Raspberry Pi reads USB HID interfaces from Linux `hidraw` and can translate standard Linux `evdev` gamepad events into a standard HID Game Pad report; Windows receives descriptors and reports over mutual TLS and asks the KMDF/VHF driver to create matching virtual HID devices. This is HID transport, not a general USB/IP implementation.
