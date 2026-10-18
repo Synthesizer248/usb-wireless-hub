@@ -1,0 +1,124 @@
+Subject: [PATCH] usbip: use coherent buffers for isochronous URBs
+
+Large isochronous transfers can exceed the largest kmalloc order on the Pi Zero 2 W. Allocate these transfer buffers with the USB DMA API, pass the resulting local DMA address to the HCD, and free through the matching API. Ignore client-host DMA mapping flags for ordinary buffers.
+--- a/drivers/usb/usbip/stub.h
++++ b/drivers/usb/usbip/stub.h
+@@ -6,6 +6,7 @@
+ #ifndef __USBIP_STUB_H
+ #define __USBIP_STUB_H
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/list.h>
+ #include <linux/slab.h>
+ #include <linux/spinlock.h>
+@@ -54,6 +55,8 @@
+ 	struct stub_device *sdev;
+ 	struct urb **urbs;
+ 	struct scatterlist *sgl;
++	dma_addr_t transfer_buffer_dma;
++	bool transfer_buffer_coherent;
+ 	int num_urbs;
+ 	int completed_urbs;
+ 	int urb_status;
+--- a/drivers/usb/usbip/stub_rx.c
++++ b/drivers/usb/usbip/stub_rx.c
+@@ -493,6 +493,8 @@
+ 	if (!priv)
+ 		return;
+ 
++	priv->transfer_buffer_coherent = false;
++	priv->transfer_buffer_dma = 0;
+ 	buf_len = (unsigned long long)pdu->u.cmd_submit.transfer_buffer_length;
+ 
+ 	if (use_sg && !buf_len) {
+@@ -528,6 +530,18 @@
+ 				pdu->u.cmd_submit.transfer_flags &=
+ 								~USBIP_URB_DMA_MAP_SG;
+ 			}
++		} else if (usb_pipeisoc(pipe)) {
++			/*
++			 * Large isochronous buffers can exceed kmalloc's largest
++			 * order. Allocate through the USB DMA API for a contiguous
++			 * DMA mapping without a high-order kmalloc allocation.
++			 */
++			buffer = usb_alloc_coherent(udev, buf_len, GFP_KERNEL,
++							    &priv->transfer_buffer_dma);
++			if (!buffer)
++				goto err_malloc;
++			memset(buffer, 0, buf_len);
++			priv->transfer_buffer_coherent = true;
+ 		} else {
+ 			buffer = kzalloc(buf_len, GFP_KERNEL);
+ 			if (!buffer)
+@@ -537,7 +551,7 @@
+ 
+ 	/* allocate urb array */
+ 	priv->num_urbs = num_urbs;
+-	priv->urbs = kmalloc_array(num_urbs, sizeof(*priv->urbs), GFP_KERNEL);
++	priv->urbs = kcalloc(num_urbs, sizeof(*priv->urbs), GFP_KERNEL);
+ 	if (!priv->urbs)
+ 		goto err_urbs;
+ 
+@@ -565,7 +579,7 @@
+ 					8, GFP_KERNEL);
+ 		if (!priv->urbs[0]->setup_packet) {
+ 			usbip_event_add(ud, SDEV_EVENT_ERROR_MALLOC);
+-			return;
++			goto err_urb;
+ 		}
+ 
+ 		usbip_pack_pdu(pdu, priv->urbs[0], USBIP_CMD_SUBMIT, 0);
+@@ -599,6 +613,16 @@
+ 		is_tweaked = tweak_special_requests(priv->urbs[i]);
+ 
+ 		masking_bogus_flags(priv->urbs[i]);
++
++		/* DMA addresses from the USB/IP client are never local. */
++		if (priv->transfer_buffer_coherent) {
++			priv->urbs[i]->transfer_dma =
++				priv->transfer_buffer_dma;
++			priv->urbs[i]->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
++		} else {
++			priv->urbs[i]->transfer_flags &=
++				~URB_NO_TRANSFER_DMA_MAP;
++		}
+ 	}
+ 
+ 	if (stub_recv_xbuff(ud, priv) < 0)
+@@ -642,9 +666,19 @@
+ 	return;
+ 
+ err_urb:
++	for (i = 0; i < num_urbs; i++) {
++		if (priv->urbs[i]) {
++			kfree(priv->urbs[i]->setup_packet);
++			usb_free_urb(priv->urbs[i]);
++		}
++	}
+ 	kfree(priv->urbs);
+ err_urbs:
+-	kfree(buffer);
++	if (priv->transfer_buffer_coherent)
++		usb_free_coherent(udev, buf_len, buffer,
++				  priv->transfer_buffer_dma);
++	else
++		kfree(buffer);
+ 	sgl_free(sgl);
+ err_malloc:
+ 	usbip_event_add(ud, SDEV_EVENT_ERROR_MALLOC);
+--- a/drivers/usb/usbip/stub_main.c
++++ b/drivers/usb/usbip/stub_main.c
+@@ -301,6 +301,12 @@
+ 
+ 
+ 		if (urb->transfer_buffer && !priv->sgl) {
+-			kfree(urb->transfer_buffer);
++			if (priv->transfer_buffer_coherent)
++				usb_free_coherent(priv->sdev->udev,
++						  urb->transfer_buffer_length,
++						  urb->transfer_buffer,
++						  priv->transfer_buffer_dma);
++			else
++				kfree(urb->transfer_buffer);
+ 			urb->transfer_buffer = NULL;
+ 		}

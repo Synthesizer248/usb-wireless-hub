@@ -151,7 +151,10 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
     }
     catch { throw "Could not read existing USBHub client settings at $configPath - $($_.Exception.Message)" }
 }
-if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = [string]$previousConfig.ReceiveMode }
+$configuredReceiveMode = [string]$previousConfig.ReceiveMode
+if ([string]::IsNullOrWhiteSpace($ReceiveMode) -and -not [string]::IsNullOrWhiteSpace($configuredReceiveMode)) {
+    $ReceiveMode = $configuredReceiveMode
+}
 if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = 'zero-copy' }
 
 $usbipExe = Join-Path $env:ProgramFiles 'USBip\usbip.exe'

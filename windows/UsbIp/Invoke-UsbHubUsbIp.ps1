@@ -33,7 +33,10 @@ if (Test-Path -LiteralPath $clientConfigPath -PathType Leaf) {
     if ([string]::IsNullOrWhiteSpace($PiUser)) { $PiUser = [string]$clientConfig.PiUser }
     $script:PiHostKeyAlias = [string]$clientConfig.HostKeyAlias
     $script:PiIdentityFile = [string]$clientConfig.IdentityFile
-    if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = [string]$clientConfig.ReceiveMode }
+    $configuredReceiveMode = [string]$clientConfig.ReceiveMode
+    if ([string]::IsNullOrWhiteSpace($ReceiveMode) -and -not [string]::IsNullOrWhiteSpace($configuredReceiveMode)) {
+        $ReceiveMode = $configuredReceiveMode
+    }
 }
 if ([string]::IsNullOrWhiteSpace($PiUser)) { $PiUser = 'admin' }
 if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = 'zero-copy' }

@@ -272,6 +272,8 @@ function Invoke-SelectedDeviceAction {
         return
     }
     if ($device.State -notin @('Available', 'On hub')) { return }
+    $receiveMode = [string]$script:config.ReceiveMode
+    if ([string]::IsNullOrWhiteSpace($receiveMode)) { $receiveMode = 'zero-copy' }
     $message = "Use '$($device.Name)' on this PC?`r`n`r`nUSB devices have one owner at a time. This transfers the device from the Pi to this PC."
     if ($device.Kind -eq 'HID input') {
         $message += "`r`n`r`nThis is a keyboard, mouse, or gamepad class device. It will stop being available through the Pi's HID/VHF bridge while this PC owns it."
@@ -280,12 +282,10 @@ function Invoke-SelectedDeviceAction {
         $message += "`r`n`r`nThe Pi will refuse the transfer if Linux has the drive mounted. Safely eject it in Windows before returning it."
     }
     if ($device.Kind -eq 'Webcam') {
-        $message += "`r`n`r`nThe camera will use low-latency USB/IP receive mode for live video. Camera streaming depends on the Pi USB host controller and Wi-Fi bandwidth."
+        $message += "`r`n`r`nThe camera will use $receiveMode USB/IP receive mode. Live video depends on isochronous transfer support and Wi-Fi bandwidth."
     }
     $answer = [System.Windows.Forms.MessageBox]::Show($message, 'Use USB device', 'YesNo', 'Warning')
     if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-    $receiveMode = [string]$script:config.ReceiveMode
-    if ($device.Kind -eq 'Webcam') { $receiveMode = 'low-latency' }
     $command = '& {0} -Action Connect -BusId {1} -ReceiveMode {2} -Confirm:$false' -f `
         (ConvertTo-PowerShellLiteral $script:backendPath),
         (ConvertTo-PowerShellLiteral ([string]$device.BusId)),

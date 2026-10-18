@@ -1,0 +1,41 @@
+From: USBHub maintainers
+Subject: [PATCH] usbip: free coherent buffers outside IRQ-disabled locks
+
+DMA-coherent buffers may be freed from USB/IP completion and transmit paths.
+Queue completion cleanup for the transmit thread, then release its list lock
+before freeing buffers so dma_free_attrs() runs with interrupts enabled.
+--- a/drivers/usb/usbip/stub_tx.c
++++ b/drivers/usb/usbip/stub_tx.c
+@@ -94,7 +94,8 @@ void stub_complete(struct urb *urb)
+ 		/* It will be freed in stub_device_cleanup_urbs(). */
+ 	} else if (priv->unlinking) {
+ 		stub_enqueue_ret_unlink(sdev, priv->seqnum, urb->status);
+-		stub_free_priv_and_urb(priv);
++		/* DMA-coherent buffers must be freed outside IRQ-disabled context. */
++		list_move_tail(&priv->list, &sdev->priv_free);
+ 	} else {
+ 		list_move_tail(&priv->list, &sdev->priv_tx);
+ 	}
+@@ -151,6 +152,7 @@ static int stub_send_ret_submit(struct stub_device *sdev)
+ {
+ 	unsigned long flags;
+ 	struct stub_priv *priv, *tmp;
++	LIST_HEAD(priv_free_list);
+ 
+ 	struct msghdr msg;
+ 	size_t txsize;
+@@ -356,10 +358,11 @@ static int stub_send_ret_submit(struct stub_device *sdev)
+ 	}
+ 
+ 	spin_lock_irqsave(&sdev->priv_lock, flags);
+-	list_for_each_entry_safe(priv, tmp, &sdev->priv_free, list) {
+-		stub_free_priv_and_urb(priv);
+-	}
++	list_splice_init(&sdev->priv_free, &priv_free_list);
+ 	spin_unlock_irqrestore(&sdev->priv_lock, flags);
+ 
++	list_for_each_entry_safe(priv, tmp, &priv_free_list, list)
++		stub_free_priv_and_urb(priv);
++
+ 	return total_size;
+ }
