@@ -223,6 +223,8 @@ foreach ($taskName in @('USBHub SSH Tunnel', 'USBHub Auto Connect')) {
 }
 
 $startupDir = [Environment]::GetFolderPath('Startup')
+$legacyAutoShortcut = Join-Path $startupDir 'USBHub Auto Connect.lnk'
+Remove-Item -LiteralPath $legacyAutoShortcut -Force -ErrorAction SilentlyContinue
 $startupShortcutPath = Join-Path $startupDir 'USBHub SSH Tunnel.lnk'
 $startupShortcut = $shell.CreateShortcut($startupShortcutPath)
 if ($null -eq $startupShortcut) { throw "Windows could not create the startup shortcut at $startupShortcutPath." }
@@ -255,16 +257,6 @@ Write-Host 'USBHub SSH tunnel stopped for this Windows session.'
 Set-Content -LiteralPath $stopScript -Value $stopSource -Encoding UTF8
 
 $claimScript = Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'
-$autoShortcutPath = Join-Path $startupDir 'USBHub Auto Connect.lnk'
-$autoShortcut = $shell.CreateShortcut($autoShortcutPath)
-if ($null -eq $autoShortcut) { throw "Windows could not create the startup shortcut at $autoShortcutPath." }
-$autoShortcut.TargetPath = $powershellExe
-$autoShortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$claimScript`" -Action Auto -PiAddress `"$PiAddress`" -PiUser `"$PiUser`""
-$autoShortcut.WorkingDirectory = $installedUsbIpDir
-$autoShortcut.Description = 'Automatically claims eligible USB devices for the first available USBHub PC.'
-$autoShortcut.WindowStyle = 7
-$autoShortcut.Save()
-
 $desktop = [Environment]::GetFolderPath('Desktop')
 $shortcutPath = Join-Path $desktop 'Claim USBHub Device.lnk'
 $shortcut = $shell.CreateShortcut($shortcutPath)
@@ -274,6 +266,15 @@ $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$claimScript`"
 $shortcut.WorkingDirectory = $installedUsbIpDir
 $shortcut.Description = 'Choose a USB device on the USBHub and claim it for this PC.'
 $shortcut.Save()
+$deviceCenterScript = Join-Path $installedUsbIpDir 'Show-UsbHubDeviceCenter.ps1'
+$deviceCenterPath = Join-Path $desktop 'USBHub Device Center.lnk'
+$deviceCenter = $shell.CreateShortcut($deviceCenterPath)
+if ($null -eq $deviceCenter) { throw "Windows could not create the device center shortcut at $deviceCenterPath." }
+$deviceCenter.TargetPath = $powershellExe
+$deviceCenter.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -File `"$deviceCenterScript`""
+$deviceCenter.WorkingDirectory = $installedUsbIpDir
+$deviceCenter.Description = 'Browse USB devices on the USBHub and use or return one on this PC.'
+$deviceCenter.Save()
 $stopShortcutPath = Join-Path $desktop 'Stop USBHub Tunnel.lnk'
 $stopShortcut = $shell.CreateShortcut($stopShortcutPath)
 if ($null -eq $stopShortcut) { throw "Windows could not create the desktop shortcut at $stopShortcutPath." }
@@ -294,9 +295,8 @@ else {
 
 & $powershellExe -NoProfile -ExecutionPolicy Bypass -File $stopScript -TunnelScript $tunnelScript -AutoScript $claimScript -IdentityFile $keyPath
 Start-Process -FilePath $powershellExe -ArgumentList $startupShortcut.Arguments -WindowStyle Hidden
-Start-Process -FilePath $powershellExe -ArgumentList $autoShortcut.Arguments -WindowStyle Hidden
 
-Write-Host 'The hidden SSH tunnel and automatic USB device scanner start now and at Windows sign-in.'
-Write-Host "USBHub Auto Connect claims eligible devices for the first PC to win the Pi bind race."
-Write-Host "Use the desktop shortcut '$shortcutPath' only when you want to choose a device manually."
+Write-Host 'The hidden SSH tunnel starts now and at Windows sign-in. Devices remain on the Pi until a PC requests them.'
+Write-Host "Open '$deviceCenterPath' to browse devices, choose Use on this PC, or return a device to the hub."
+Write-Host "The command-line shortcut '$shortcutPath' remains available for manual device selection."
 Write-Host "Use '$stopShortcutPath' to stop the tunnel for the current session."

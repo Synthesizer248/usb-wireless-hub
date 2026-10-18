@@ -1,4 +1,4 @@
-# USBHub: descriptor-driven HID over Wi-Fi (development copy)
+# USBHub: wireless HID and USB/IP sharing (development copy)
 
 ## Windows USB/IP client setup on a new PC
 
@@ -9,9 +9,9 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress usbwirelesshub.local
 ```
 
-The bootstrap downloads the pinned USBip release from its upstream GitHub release, checks the SHA-256 digest and Authenticode signature, then opens the vendor installer with a UAC prompt. The installer may briefly restart USB hubs; save work and pause USB transfers first. Windows administrator approval is required to install a kernel driver. The Pi address is saved per Windows account so later commands do not need it repeated. It also installs the Pi-side storage guard and a narrowly scoped sudo rule for automatic claims.
+The bootstrap downloads the pinned USBip release from its upstream GitHub release, checks its SHA-256 digest and Authenticode signature, then opens the vendor installer with a UAC prompt. The installer may briefly restart USB hubs; save work and pause USB transfers first. Windows administrator approval is required to install its kernel driver. The Pi address is saved per Windows account. The installer also configures the Pi storage guard and creates a USBHub Device Center desktop shortcut.
 
-The installer keeps the SSH tunnel open and automatically claims eligible devices after Windows sign-in. When multiple PCs are configured, the first successful Pi-side bind owns the device. To choose a particular device manually, run:
+The installer keeps the SSH tunnel open after Windows sign-in. Devices remain attached to the Pi until a user opens the USBHub Device Center desktop shortcut and chooses Use on this PC. The first PC whose operator requests a device and wins the Pi bind gets exclusive ownership; the device can then be returned from Device Center. The client does not auto-claim devices in the background.
 
 ```powershell
 .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Tunnel
@@ -23,7 +23,7 @@ The installer keeps the SSH tunnel open and automatically claims eligible device
 
 `Claim` lists devices currently attached to the Pi, lets the local operator choose one, and requests an exclusive USB/IP bind-and-attach. The first PC to claim a device gets it; another PC cannot claim it while it is bound or attached. Use `-Action Disconnect -Port <n>` to return it to the Pi, then another PC can claim it. Windows loads its normal class driver after attachment, so printers, storage, cameras, and other classes do not need a USBHub-specific device driver. The USB/IP client driver itself must be installed once per PC by the bootstrap above; Windows administrator approval is required. `-Action Persist` is optional and saves all currently imported devices on that PC for automatic reconnect.
 
-The broad goal is a wireless USB hub for devices such as flash drives, printers, and scanners. The validated HID/VHF bridge in this folder covers keyboards, mice, and the Xbox 360 gamepad. Arbitrary USB device passthrough is being evaluated on a separate USB/IP track; see [USBIP-ROADMAP.md](USBIP-ROADMAP.md). The Windows USB/IP client is maintained upstream; see [references/README.md](references/README.md).
+The broad goal is a wireless USB hub for devices such as flash drives, printers, and scanners. The HID/VHF report bridge shares supported keyboard, mouse, and gamepad input over Wi-Fi; USB/IP gives a selected Windows PC ownership of the real USB device for broader class support. See [the VirtualHere comparison and evidence](docs/VIRTUALHERE-DEVICE-FLOW.md) and [USBIP-ROADMAP.md](USBIP-ROADMAP.md). The Windows USB/IP client is maintained upstream; see [references/README.md](references/README.md).
 
 To flash a fresh Raspberry Pi OS Lite image with the USB/IP host service and storage safety helper, see [the Pi image build and flashing guide](pi/image/README.md). The image is built for 64-bit Raspberry Pi OS and is currently targeted at the Zero 2 W; configure Wi-Fi, account, hostname, and SSH in Raspberry Pi Imager on first flash.
 

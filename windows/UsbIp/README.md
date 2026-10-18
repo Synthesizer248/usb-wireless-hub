@@ -9,13 +9,18 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 .\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress usbwirelesshub.local
 ```
 
-The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-256 digest and Authenticode signature, and starts the official interactive setup with UAC. Save work first: setup can restart USB hubs. Administrator approval and any restart requested by the upstream installer are still required; Windows does not allow a normal user script to silently install kernel drivers. Configure a stable hostname in Raspberry Pi Imager and use its `<hostname>.local` mDNS name here instead of a DHCP address. For the current hub, use `usbwirelesshub.local`. This keeps the client reachable when the router changes the Pi's IP address. The target and SSH identity are stored in `%LOCALAPPDATA%\UsbHub\client.json` for this Windows account. The script installs a dedicated SSH key on the Pi, copies the client scripts into `%LOCALAPPDATA%\UsbHub\client`, installs the Pi safety helper and its narrowly scoped sudo rule, and creates hidden Startup shortcuts for the SSH tunnel and automatic claiming. They start when the current session is configured and at Windows sign-in. The Pi account password is requested while authorizing the key; the Pi sudo password is requested once to install the helper and rule. Desktop shortcuts for **Claim USBHub Device** (manual override) and **Stop USBHub Tunnel** are also added.
+The script installs the verified x64 or ARM64 USBip client after normal UAC approval. Save work first because setup can restart USB hubs. Configure a stable Raspberry Pi hostname and use its .local mDNS name; for this hub, use usbwirelesshub.local. The Pi address and SSH identity are stored in %LOCALAPPDATA%\UsbHub\client.json. The installer installs a dedicated SSH key, the Pi storage guard and its scoped bind permission, and creates a hidden Startup shortcut for the SSH tunnel. The tunnel starts now and at Windows sign-in; devices stay on the Pi until a PC requests them. Desktop shortcuts for USBHub Device Center, Claim USBHub Device (command-line selection), and Stop USBHub Tunnel are also added.
 
-When only changing a Windows client's stored Pi hostname or repairing its Startup shortcuts after the Pi safety helper was already installed, add `-SkipPiSetup`. That updates the Windows client without reinstalling the Pi helper.
+To install the Device Center or remove the older background auto-claim startup shortcut on an already configured PC, rerun Install-UsbHubClient.ps1 with -SkipPiSetup and the saved hub address. This refreshes the Windows client without reinstalling the Pi safety helper.
 
-The client uses USBip's `zero-copy` receive mode by default. `low-latency` is also supported for troubleshooting device-specific transfer problems. Select it for one manual claim with `-ReceiveMode low-latency`, or save it for automatic claims by rerunning the installer with `-SkipPiSetup -ReceiveMode low-latency`. The setting applies to new attachments; safely eject and disconnect an existing device before reconnecting it. This mode is a diagnostic fallback, not a guaranteed fix for device-side endpoint stalls or failing media.
+For the current hub, from the repository folder run:
 
-The bootstrap installs the Pi-side storage guard and its scoped automatic bind permission. If setting up only the client scripts manually, install them with:
+    .\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress usbwirelesshub.local -SkipPiSetup
+
+
+The client uses zero-copy receive mode by default. Low-latency mode is available for troubleshooting; select it for one manual claim with -ReceiveMode low-latency, or save it for future attachments by rerunning the installer with -SkipPiSetup -ReceiveMode low-latency. Safely eject and disconnect an existing device before reconnecting it. This mode is a diagnostic fallback, not a guaranteed fix for USB transfer stalls.
+
+The bootstrap installs the Pi-side storage guard and its scoped bind permission used by Device Center. If setting up only the client scripts manually, install them with:
 
 ```powershell
 .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action SetupPi
@@ -36,13 +41,13 @@ This copies pi/usbip/manage-usbhub-usbip.sh to /usr/local/sbin/manage-usbhub-usb
 
 ## Use after setup
 
-After signing in to Windows, the tunnel and auto-claim monitor run in the background. When a supported device is plugged into the Pi, each configured PC checks for it; the first PC whose Pi-side bind succeeds gets exclusive ownership, and Windows loads its normal class driver. Other PCs skip the already-claimed device. If several PCs start together, whichever wins the USB/IP bind race owns the device. For deterministic ownership, enable automatic claiming on only the intended PC and use manual **Claim USBHub Device** on others.
+After signing in to Windows, the SSH tunnel runs in the background. Open USBHub Device Center from the desktop to see devices connected to the configured Pi. Select one and choose Use on this PC to transfer ownership to this PC; the Pi binds it through USB/IP and Windows loads its normal class driver. A device is exclusive to one PC until returned. The first PC whose operator requests it and wins the Pi bind gets it. Newly attached devices are not claimed in the background, so multiple PCs do not race each other.
 
-Automatic claiming excludes HID devices and devices bound to the Pi's HID/gamepad drivers (the Pi's HID/VHF bridge handles those), USB hubs, network adapters, and webcams. It attempts other USB classes, including mass-storage devices; the Pi helper refuses a storage device that is mounted on the Pi. USB/IP compatibility still varies by device class and transfer type. The manual Claim shortcut remains available for devices that need an explicit selection.
+Device Center identifies HID input devices and warns that using one through USB/IP transfers it away from the Pi HID/VHF bridge. A device marked Unavailable / in use is not being offered by USB/IP; it may be in use by the Pi or another PC. The Pi helper refuses a storage device Linux currently has mounted. USB/IP compatibility varies by device class and transfer type.
 
-The shortcuts use the installed copy of the client scripts, so the repository folder can be moved or removed after setup. **Stop USBHub Tunnel** stops both background processes for the current session; they start again at the next Windows sign-in.
+The shortcuts use the installed copy of the client scripts, so the repository folder can be moved or removed after setup. Stop USBHub Tunnel stops the background tunnel for the current session; it starts again at the next Windows sign-in.
 
-For command-line inventory and ownership, run the installed client script:
+For command-line inventory and ownership as an alternative to Device Center, run the installed client script:
 
     & "$env:LOCALAPPDATA\UsbHub\client\windows\UsbIp\Invoke-UsbHubUsbIp.ps1" -Action Inventory
     & "$env:LOCALAPPDATA\UsbHub\client\windows\UsbIp\Invoke-UsbHubUsbIp.ps1" -Action Claim
@@ -51,7 +56,7 @@ For command-line inventory and ownership, run the installed client script:
 
     .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Connect -BusId 1-1.4
 
-After connecting the devices this PC should reconnect, save those imports as persistent:
+To make current imports persistent after reconnecting this PC, run:
 
     .\windows\UsbIp\Invoke-UsbHubUsbIp.ps1 -Action Persist
 
@@ -71,11 +76,11 @@ The command asks for confirmation, detaches from Windows, then unbinds the devic
 
 ## Ownership and current limits
 
-- A physical USB device has one owner at a time. `Claim` is an operator-requested, exclusive claim; it is not an automatic cross-PC lease service. Do not USB/IP-connect a keyboard, mouse, or gamepad that is already being forwarded by the Pi HID/VHF service, or a drive currently used by iSCSI.
+- A physical USB device has one owner at a time. Device Center Use on this PC is an operator-requested exclusive claim. HID devices normally use the separate Pi HID/VHF report bridge; claiming one through USB/IP transfers the physical device and interrupts that bridge while it is owned here. Do not claim a drive currently used by iSCSI.
 - The Pi USB/IP daemon remains restricted to loopback; keep its SSH tunnel open while using the USB/IP connection. Do not open TCP port 3240 to Wi-Fi.
 - Storage needs safe ejection on Windows before disconnecting. The Pi-side helper also refuses to bind mounted filesystems.
 - Xbox 360 USB/IP attach and input have passed on the development PC with the rebuilt Pi USB/IP host modules. This confirms the basic attach path; it does not prove every device class.
-- A SanDisk Cruzer Blade (0781:5567) was exported and mounted by Windows as a FAT32 volume with drive letter F: on the development PC. A different SanDisk Cruzer Force (0781:557d) was auto-claimed and assigned F:, but Windows reads stalled and the Pi logged repeated USB/IP endpoint 1 stalls. That is a transfer failure after enumeration, not a claim or drive-letter failure. The low-latency receive mode is available as a diagnostic retry but has not yet been verified with this model. Safely eject it before disconnecting; do not initialize or format it if Windows prompts. Other drives and filesystems still need validation.
+- A SanDisk Cruzer Blade (0781:5567) was exported and mounted by Windows as a FAT32 volume with drive letter F: on the development PC. A different SanDisk Cruzer Force (0781:557d) was claimed and assigned F:, but Windows reads stalled and the Pi logged repeated USB/IP endpoint 1 stalls. That is a transfer failure after enumeration, not a claim or drive-letter failure. Low-latency receive mode is available as a diagnostic retry but has not yet been verified with this model. Safely eject it before disconnecting; do not initialize or format it if Windows prompts. Other drives and filesystems still need validation.
 - Printer and scanner compatibility still needs device-by-device testing.
-- Auto-claim uses first successful Pi-side bind as its ownership rule. Multiple PCs can race for a newly attached device; only one can win. To avoid accidental assignment, leave auto-claim enabled on the intended PC and use manual Claim on other PCs.
-- The tunnel and auto-claim shortcuts are registered for the current Windows user. Windows kernel client installation still requires one-time administrator approval; the installer may request a restart.
+- Device Center uses the configured mDNS hostname or IP for one USBHub; it does not yet browse DNS-SD advertisements to find multiple hubs automatically.
+- The tunnel shortcut is registered for the current Windows user. Windows kernel client installation still requires one-time administrator approval; the installer may request a restart.
