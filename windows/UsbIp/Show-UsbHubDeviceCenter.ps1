@@ -132,7 +132,7 @@ try {
         else { $kind = 'USB device' }
         if ($connected.ContainsKey($bus)) { $state = 'Connected to this PC'; $port = [int]$connected[$bus].Port; if ($vidPid -eq '') { $vidPid = [string]$connected[$bus].VidPid } }
         elseif ($exported.Contains($bus)) { $state = 'Available'; $port = 0 }
-        else { $state = 'Unavailable / in use'; $port = 0 }
+        else { $state = 'On hub'; $port = 0 }
         $devices.Add([pscustomobject]@{ BusId = $bus; VidPid = $vidPid; Name = $name; Kind = $kind; State = $state; Port = $port })
     }
     foreach ($bus in @($connected.Keys)) {
@@ -231,7 +231,7 @@ function Update-Buttons {
         $script:deviceActionButton.Text = 'Return to Hub'
         $script:deviceActionButton.Enabled = $idle
     }
-    elseif ($device.State -eq 'Available' -and $tunnelReady) {
+    elseif ($device.State -in @('Available', 'On hub') -and $tunnelReady) {
         $script:deviceActionButton.Text = 'Use on this PC'
         $script:deviceActionButton.Enabled = $idle
     }
@@ -254,7 +254,7 @@ function Show-Inventory {
     $script:deviceList.EndUpdate()
     $script:hubNameLabel.Text = "USBHub - $($Inventory.Hub)"
     if (@($Inventory.Devices).Count -eq 0) { $script:statusLabel.Text = 'Hub is connected; no USB devices are currently attached.' }
-    else { $script:statusLabel.Text = "Found $(@($Inventory.Devices).Count) device(s). Select one, then choose Use on this PC." }
+    else { $script:statusLabel.Text = "Found $(@($Inventory.Devices).Count) device(s). Select one, then choose Use on this PC. Mounted drives are refused." }
     Update-Buttons
 }
 
@@ -271,7 +271,7 @@ function Invoke-SelectedDeviceAction {
         Start-ChildPowerShell -Command $command -Kind Disconnect
         return
     }
-    if ($device.State -ne 'Available') { return }
+    if ($device.State -notin @('Available', 'On hub')) { return }
     $message = "Use '$($device.Name)' on this PC?`r`n`r`nUSB devices have one owner at a time. This transfers the device from the Pi to this PC."
     if ($device.Kind -eq 'HID input') {
         $message += "`r`n`r`nThis is a keyboard, mouse, or gamepad class device. It will stop being available through the Pi's HID/VHF bridge while this PC owns it."
