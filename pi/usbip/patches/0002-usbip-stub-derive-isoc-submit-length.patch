@@ -1,0 +1,91 @@
+Subject: [PATCH] usbip: stub: derive isoc IN length from packet descriptors
+
+Some host controllers complete isochronous packet descriptors without setting
+the aggregate URB actual_length. Raspberry Pi DWC2's host-completion path
+copies its internal aggregate field to the URB, while the isochronous path
+updates individual descriptor lengths. USB/IP then rejects a response when
+the aggregate is zero but packet payloads are present.
+
+For isochronous IN responses, compute the USB/IP actual_length from the packet
+descriptors. Reject conflicting nonzero URB totals and packet totals that
+exceed the transfer buffer. This keeps the protocol length consistent with the
+payload and descriptor data sent on the wire.
+
+Based on Raspberry Pi Linux rpi-6.18.y drivers/usb/usbip/stub_tx.c.
+This patch has not yet been built or validated on the target camera.
+diff --git a/drivers/usb/usbip/stub_tx.c b/drivers/usb/usbip/stub_tx.c
+index 7eb2e07..49e86bf 100644
+--- a/drivers/usb/usbip/stub_tx.c
++++ b/drivers/usb/usbip/stub_tx.c
+@@ -212,8 +212,6 @@ static int stub_send_ret_submit(struct stub_device *sdev)
+ 			pdu_header.u.ret_submit.actual_length = actual_length;
+ 		}
+ 
+-		usbip_header_correct_endian(&pdu_header, 1);
+-
+ 		iov[iovnum].iov_base = &pdu_header;
+ 		iov[iovnum].iov_len  = sizeof(pdu_header);
+ 		iovnum++;
+@@ -265,6 +263,7 @@ static int stub_send_ret_submit(struct stub_device *sdev)
+ 		} else if (usb_pipein(urb->pipe) &&
+ 			   usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS) {
+ 			/*
++			 * The aggregate URB length is not reliable on all HCDs.
+ 			 * For isochronous packets: actual length is the sum of
+ 			 * the actual length of the individual, packets, but as
+ 			 * the packet offsets are not changed there will be
+@@ -274,16 +273,31 @@ static int stub_send_ret_submit(struct stub_device *sdev)
+ 
+ 			int i;
+ 
++			actual_length = 0;
+ 			for (i = 0; i < urb->number_of_packets; i++) {
++				u32 packet_length =
++					urb->iso_frame_desc[i].actual_length;
++
++				if (actual_length > (u32)urb->transfer_buffer_length ||
++				    packet_length >
++				    (u32)urb->transfer_buffer_length - actual_length) {
++					dev_err(&sdev->udev->dev,
++						"iso packet lengths exceed transfer buffer\n");
++					kfree(iov);
++					usbip_event_add(&sdev->ud,
++							SDEV_EVENT_ERROR_TCP);
++					return -1;
++				}
++
+ 				iov[iovnum].iov_base = urb->transfer_buffer +
+ 					urb->iso_frame_desc[i].offset;
+-				iov[iovnum].iov_len =
+-					urb->iso_frame_desc[i].actual_length;
++				iov[iovnum].iov_len = packet_length;
+ 				iovnum++;
+-				txsize += urb->iso_frame_desc[i].actual_length;
++				actual_length += packet_length;
++				txsize += packet_length;
+ 			}
+-
+-			if (txsize != sizeof(pdu_header) + urb->actual_length) {
++			if (urb->actual_length &&
++			    urb->actual_length != actual_length) {
+ 				dev_err(&sdev->udev->dev,
+ 					"actual length of urb %d does not match iso packet sizes %zu\n",
+ 					urb->actual_length,
+@@ -293,7 +307,17 @@ static int stub_send_ret_submit(struct stub_device *sdev)
+ 						SDEV_EVENT_ERROR_TCP);
+ 				return -1;
+ 			}
++			pdu_header.u.ret_submit.actual_length = actual_length;
++			if (txsize != sizeof(pdu_header) + actual_length) {
++				dev_err(&sdev->udev->dev,
++					"iso payload length does not match packet sizes\n");
++				kfree(iov);
++				usbip_event_add(&sdev->ud,
++						SDEV_EVENT_ERROR_TCP);
++				return -1;
++			}
+ 		}
++		usbip_header_correct_endian(&pdu_header, 1);
+ 
+ 		/* 3. setup iso_packet_descriptor */
+ 		if (usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS) {

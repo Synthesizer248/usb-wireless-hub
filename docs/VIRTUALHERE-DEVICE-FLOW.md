@@ -12,7 +12,7 @@ Sources:
 - [VirtualHere Client API](https://www.virtualhere.com/client_api) — LIST, USE, and STOP USING commands.
 - [VirtualHere Client Configuration FAQ](https://www.virtualhere.com/client_configuration_faq) — the same physical device cannot be used simultaneously by two clients, and client-driver installation requires administrator access.
 
-That documents the user-visible behavior and the exclusive ownership model. It does not mean VirtualHere's server protocol is USB/IP; VirtualHere documents its Linux server as a user-space server and its Linux client as using a USB/IP client driver. USBHub uses its own open USB/IP host/client path and does not copy VirtualHere software or protocol.
+That documents the user-visible behavior and the exclusive ownership model. The supplied VirtualHere Windows server and client binaries were read-only inspected: both have valid VirtualHere Pty. Ltd. Authenticode signatures; the server identifies as 4.8.8 (SHA-256 `6AE762D598800F0F11BA4F317F09697177A569BADA586CC518BAABFC4E043EEC`) and the client as 6.0.3 (SHA-256 `64FA5F2949A781B082E20E8E24C7549EB8F7289B29B601FC0F2CABDA86FA76DF`). The proprietary executable code was not disassembled, so these hashes identify the files while vendor documentation proves the advertised network and attach behavior. It does not expose every implementation detail. It also does not mean VirtualHere's server protocol is USB/IP; VirtualHere documents its Linux server as a user-space server and its Linux client as using a USB/IP client driver. USBHub uses its own open USB/IP host/client path and does not copy VirtualHere software or protocol.
 
 ## How USBHub handles HID
 
@@ -39,3 +39,13 @@ The window warns before taking an HID input device away from the Pi HID/VHF brid
 - USB/IP device compatibility varies with the device and transfer type. The development notes record a SanDisk Cruzer Blade enumerating as a FAT32 drive on Windows and an Xbox 360 controller enumerating through USB/IP. They also record read stalls with another flash-drive model. These examples demonstrate the attach path, not universal compatibility.
 
 This is a conceptual implementation of the VirtualHere workflow—browse, request use, and return—using USBHub's existing HID/VHF and USB/IP transports.
+
+## Camera streaming evidence and current fix
+
+The VirtualHere client documentation supports its local-device workflow, but does not promise webcam operation on every platform or USB server path. It explicitly notes that webcams/microphones do not work through its macOS client; VirtualHere also warns that high-bandwidth isochronous devices can fail on its USB device-mode Pi path. These are limits of particular paths, not a general claim that VirtualHere Windows webcam redirection cannot work.
+
+USB webcams commonly stream video with isochronous USB transfers. USB/IP forwards the USB requests and packet results over the network; it does not turn the camera into a compressed network video stream. The development Pi's exact kernel message was `actual length of urb 0 does not match iso packet sizes 6144`. In Raspberry Pi's `rpi-6.18.y` source, DWC2 records the packet lengths in the isochronous descriptors, then its host completion copies the separate aggregate `actual_length` field into the Linux URB. USB/IP's transmit code checks that the aggregate matches the sum of packet lengths and closes the transfer on mismatch. This matches the observed `0` versus `6144` failure.
+
+USBHub now carries a candidate USB/IP transmit patch that computes this response total from the packet descriptors when the aggregate is zero, while rejecting conflicting nonzero values and totals beyond the transfer buffer. It is not included in the released Pi image and has not yet been built or tested with the camera. Even after this metadata issue is fixed, low-latency USB/IP delivery cannot remove Wi-Fi jitter or the camera's isochronous timing limits; successful live video must be verified on the target setup.
+
+Evidence: [VirtualHere client workflow and platform notes](https://www.virtualhere.com/usb_client_software), [VirtualHere server architecture and Bonjour/TCP details](https://www.virtualhere.com/usb_server_software), [Raspberry Pi DWC2 completion code](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/drivers/usb/dwc2/hcd.c), [DWC2 isochronous packet accounting](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/drivers/usb/dwc2/hcd_intr.c), and [USB/IP isochronous transmit validation](https://github.com/raspberrypi/linux/blob/rpi-6.18.y/drivers/usb/usbip/stub_tx.c).

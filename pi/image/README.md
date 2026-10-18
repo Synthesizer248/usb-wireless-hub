@@ -19,7 +19,7 @@ The image build targets 64-bit Raspberry Pi OS Lite and is intended first for Ra
 5. Open `https://<hostname>.local:9090` from a phone or laptop on the same LAN. Sign in with the Pi account and temporary password created in Raspberry Pi Imager. The first password-authenticated login requires you to choose a new password before continuing; if you sign in over SSH first, that prompt appears there instead. Afterward, use Cockpit's **Accounts** page to change the password whenever needed. Cockpit includes a browser terminal; the Network page manages Wi-Fi through NetworkManager. The initial HTTPS certificate is self-signed, so the browser will show a certificate warning until you trust it. Changing the active Wi-Fi network can interrupt the page until the Pi reconnects.
 6. On each Windows PC, run the project bootstrap once. It installs the Windows USB/IP driver with administrator approval, then configures the SSH key, Pi-side storage guard, and automatic client. Eligible devices are claimed by the first configured PC that binds them; see [the Windows USB/IP workflow](../../windows/UsbIp/README.md).
 
-The bundled image includes the device-class-agnostic USB/IP transport. Windows still needs its upstream USB/IP kernel client installed once per PC with administrator approval. The Windows class driver handles an attached USB device. Device compatibility depends on the device's transfer types and the Wi-Fi/network; webcam isochronous streaming is not a supported validation target.
+The bundled image includes the device-class-agnostic USB/IP transport. Windows still needs its upstream USB/IP kernel client installed once per PC with administrator approval. The Windows class driver handles an attached USB device. Device compatibility depends on the device's transfer types and the Wi-Fi/network; webcam isochronous streaming is not yet validated.
 
 ## Scope and safety
 
@@ -27,5 +27,5 @@ The bundled image includes the device-class-agnostic USB/IP transport. Windows s
 - The USB/IP daemon is loopback-only behind SSH; do not expose TCP 3240 to the LAN.
 - Cockpit uses the Pi's Linux account authentication and HTTPS on TCP 9090. Keep the web console on a trusted LAN and use a strong Pi account password.
 - A device can be claimed by only one PC at a time. Disconnect it from Windows before another PC claims it.
-- No custom USB/IP kernel patch is included. The image uses the kernel modules shipped for its Raspberry Pi OS kernel. The candidate patch under `pi/usbip/patches/` is diagnostic/source material and is not applied to this image.
+- The image uses the kernel modules shipped for its Raspberry Pi OS kernel. The candidate camera isochronous-length patch under `pi/usbip/patches/` is not applied to this image; see [Pi USB/IP patch notes](../usbip/README.md).
 - USB/IP host compatibility and device-class behavior must be validated on the target Pi and devices before production use.
