@@ -28,7 +28,93 @@ if ([string]::IsNullOrWhiteSpace($PiUser) -or $PiUser -match '[\s/@]') {
     throw 'Enter a valid SSH user name.'
 }
 
-$architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+$architecture = $null
+try {
+    # RuntimeInformation.OSArchitecture can be null in some Windows PowerShell
+    #/.NET Framework hosts. Query the OS-native architecture directly so an
+    # emulated x86/x64 PowerShell on ARM64 still selects the ARM64 installer.
+    if (-not ('UsbHub.NativeSystemInfo' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace UsbHub {
+    public static class NativeSystemInfo {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SYSTEM_INFO {
+            public ushort wProcessorArchitecture;
+            public ushort wReserved;
+            public uint dwPageSize;
+            public IntPtr lpMinimumApplicationAddress;
+            public IntPtr lpMaximumApplicationAddress;
+            public UIntPtr dwActiveProcessorMask;
+            public uint dwNumberOfProcessors;
+            public uint dwProcessorType;
+            public uint dwAllocationGranularity;
+            public ushort wProcessorLevel;
+            public ushort wProcessorRevision;
+        }
+
+        [DllImport("kernel32.dll")]
+        private static extern void GetNativeSystemInfo(out SYSTEM_INFO info);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
+
+        private static string MapMachine(ushort machine) {
+            switch (machine) {
+                case 0x8664: return "X64";
+                case 0xAA64: return "Arm64";
+                case 0x014c: return "X86";
+                default: return "Unknown";
+            }
+        }
+
+        public static string GetArchitecture() {
+            try {
+                ushort processMachine;
+                ushort nativeMachine;
+                if (IsWow64Process2(GetCurrentProcess(), out processMachine, out nativeMachine)) {
+                    string architecture = MapMachine(nativeMachine);
+                    if (architecture != "Unknown") return architecture;
+                }
+            }
+            catch (EntryPointNotFoundException) {
+                // IsWow64Process2 is unavailable on older Windows versions.
+            }
+
+            SYSTEM_INFO info;
+            GetNativeSystemInfo(out info);
+            switch (info.wProcessorArchitecture) {
+                case 9: return "X64";
+                case 12: return "Arm64";
+                case 0: return "X86";
+                default: return "Unknown";
+            }
+        }
+    }
+}
+'@ -ErrorAction Stop | Out-Null
+    }
+    $architecture = [UsbHub.NativeSystemInfo]::GetArchitecture()
+}
+catch {
+    # Keep a fallback for restricted hosts where Add-Type is unavailable.
+    $architecture = [Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITEW6432')
+    if ([string]::IsNullOrWhiteSpace($architecture)) {
+        $architecture = [Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITECTURE')
+    }
+    switch -Regex ($architecture) {
+        '^(AMD64|X64)$' { $architecture = 'X64'; break }
+        '^(ARM64)$' { $architecture = 'Arm64'; break }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($architecture) -or $architecture -eq 'Unknown') {
+    throw 'Could not determine the native Windows architecture. USBip supports x64 and ARM64.'
+}
 $version = '0.9.8.1'
 $releaseBase = "https://github.com/vadimgrn/usbip-win2/releases/download/v.$version"
 switch ($architecture) {
