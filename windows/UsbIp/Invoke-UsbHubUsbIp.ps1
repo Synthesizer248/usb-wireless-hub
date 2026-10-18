@@ -14,6 +14,8 @@ param(
     [string] $PiAddress,
     [string] $PiUser,
     [string] $Server = '127.0.0.1',
+    [ValidateSet('zero-copy', 'low-latency')]
+    [string] $ReceiveMode,
     [string] $BusId,
     [int] $Port = 0
 )
@@ -31,8 +33,10 @@ if (Test-Path -LiteralPath $clientConfigPath -PathType Leaf) {
     if ([string]::IsNullOrWhiteSpace($PiUser)) { $PiUser = [string]$clientConfig.PiUser }
     $script:PiHostKeyAlias = [string]$clientConfig.HostKeyAlias
     $script:PiIdentityFile = [string]$clientConfig.IdentityFile
+    if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = [string]$clientConfig.ReceiveMode }
 }
 if ([string]::IsNullOrWhiteSpace($PiUser)) { $PiUser = 'admin' }
+if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = 'zero-copy' }
 
 $ssh = Get-Command ssh.exe -ErrorAction SilentlyContinue
 $scp = Get-Command scp.exe -ErrorAction SilentlyContinue
@@ -248,7 +252,7 @@ if ($Action -eq 'Auto') {
     $mutexName = 'Local\UsbHubAutoClaim'
     $mutex = [Threading.Mutex]::new($false, $mutexName)
     if (-not $mutex.WaitOne(0)) { Write-AutoLog 'Another auto-claim process is already running; exiting.'; exit 0 }
-    Write-AutoLog "Automatic claiming started for $PiUser@$PiAddress. First PC to bind an eligible device owns it."
+    Write-AutoLog "Automatic claiming started for $PiUser@$PiAddress using receive mode $ReceiveMode. First PC to bind an eligible device owns it."
     try {
         while ($true) {
             try {
@@ -266,13 +270,13 @@ if ($Action -eq 'Auto') {
                     if ($candidate.BusId -in $attached) { continue }
                     try {
                         Invoke-AutoPiHelper -Verb bind -TargetBusId $candidate.BusId
-                        $attachOutput = @(& $usbip attach -r $Server -b $candidate.BusId 2>&1)
+                        $attachOutput = @(& $usbip attach -r $Server -b $candidate.BusId --receive-mode $ReceiveMode 2>&1)
                         if ($LASTEXITCODE -ne 0) {
                             Invoke-AutoPiHelper -Verb unbind -TargetBusId $candidate.BusId
                             Write-AutoLog "Attach failed for $($candidate.BusId) $($candidate.VidPid): $($attachOutput -join ' ')"
                             continue
                         }
-                        Write-AutoLog "Claimed $($candidate.BusId) $($candidate.VidPid) (classes $($candidate.Classes); drivers $($candidate.Drivers))."
+                        Write-AutoLog "Claimed $($candidate.BusId) $($candidate.VidPid) (classes $($candidate.Classes); drivers $($candidate.Drivers); receive mode $ReceiveMode)."
                         $attached += $candidate.BusId
                         # Give Windows time to enumerate the storage stack and
                         # assign a mount point before exporting another device.
@@ -356,10 +360,11 @@ switch ($Action) {
             throw 'SSH tunnel not available on localhost:3240. Run -Action Tunnel in another PowerShell window.'
         }
         Write-Warning 'Connect transfers exclusive ownership to this PC. Do not select a device currently used by Pi HID/VHF or iSCSI.'
+        Write-Host "USB/IP receive mode: $ReceiveMode"
         if ($PSCmdlet.ShouldProcess("Pi USB device $BusId", 'Export and connect to this PC')) {
             Invoke-PiHelper -Verb bind -TargetBusId $BusId
             try {
-                & $usbip attach -r $Server -b $BusId
+                & $usbip attach -r $Server -b $BusId --receive-mode $ReceiveMode
                 if ($LASTEXITCODE -ne 0) { throw "USB/IP attach failed with exit code $LASTEXITCODE." }
             }
             catch {
@@ -372,7 +377,7 @@ switch ($Action) {
     'Attach' {
         if ([string]::IsNullOrWhiteSpace($BusId)) { throw 'Pass -BusId from List, for example -BusId 1-1.4.' }
         if ($BusId -notmatch '^[0-9]+-[0-9]+(\.[0-9]+)*$') { throw "Invalid USB bus ID: $BusId" }
-        & $usbip attach -r $Server -b $BusId
+        & $usbip attach -r $Server -b $BusId --receive-mode $ReceiveMode
     }
     'Disconnect' {
         if ($Port -lt 1) { throw 'Pass the imported port from Ports, for example -Port 1.' }

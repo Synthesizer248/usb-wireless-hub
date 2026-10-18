@@ -13,6 +13,8 @@ The script selects the x64 or ARM64 upstream USBip installer, verifies its SHA-2
 
 When only changing a Windows client's stored Pi hostname or repairing its Startup shortcuts after the Pi safety helper was already installed, add `-SkipPiSetup`. That updates the Windows client without reinstalling the Pi helper.
 
+The client uses USBip's `zero-copy` receive mode by default. `low-latency` is also supported for troubleshooting device-specific transfer problems. Select it for one manual claim with `-ReceiveMode low-latency`, or save it for automatic claims by rerunning the installer with `-SkipPiSetup -ReceiveMode low-latency`. The setting applies to new attachments; safely eject and disconnect an existing device before reconnecting it. This mode is a diagnostic fallback, not a guaranteed fix for device-side endpoint stalls or failing media.
+
 The bootstrap installs the Pi-side storage guard and its scoped automatic bind permission. If setting up only the client scripts manually, install them with:
 
 ```powershell
@@ -73,7 +75,7 @@ The command asks for confirmation, detaches from Windows, then unbinds the devic
 - The Pi USB/IP daemon remains restricted to loopback; keep its SSH tunnel open while using the USB/IP connection. Do not open TCP port 3240 to Wi-Fi.
 - Storage needs safe ejection on Windows before disconnecting. The Pi-side helper also refuses to bind mounted filesystems.
 - Xbox 360 USB/IP attach and input have passed on the development PC with the rebuilt Pi USB/IP host modules. This confirms the basic attach path; it does not prove every device class.
-- A SanDisk Cruzer Blade (0781:5567) was exported and mounted by Windows as a FAT32 volume with drive letter F: on the development PC. A different SanDisk Cruzer Force (0781:557d) was auto-claimed and assigned F:, but Windows reads stalled and the Pi logged repeated USB/IP endpoint 1 stalls. That is a transfer failure after enumeration, not a claim or drive-letter failure. Safely eject it before disconnecting; do not initialize or format it if Windows prompts. Other drives and filesystems still need validation.
+- A SanDisk Cruzer Blade (0781:5567) was exported and mounted by Windows as a FAT32 volume with drive letter F: on the development PC. A different SanDisk Cruzer Force (0781:557d) was auto-claimed and assigned F:, but Windows reads stalled and the Pi logged repeated USB/IP endpoint 1 stalls. That is a transfer failure after enumeration, not a claim or drive-letter failure. The low-latency receive mode is available as a diagnostic retry but has not yet been verified with this model. Safely eject it before disconnecting; do not initialize or format it if Windows prompts. Other drives and filesystems still need validation.
 - Printer and scanner compatibility still needs device-by-device testing.
 - Auto-claim uses first successful Pi-side bind as its ownership rule. Multiple PCs can race for a newly attached device; only one can win. To avoid accidental assignment, leave auto-claim enabled on the intended PC and use manual Claim on other PCs.
 - The tunnel and auto-claim shortcuts are registered for the current Windows user. Windows kernel client installation still requires one-time administrator approval; the installer may request a restart.

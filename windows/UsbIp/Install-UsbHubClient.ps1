@@ -11,6 +11,8 @@
 param(
     [string] $PiAddress,
     [string] $PiUser = 'admin',
+    [ValidateSet('zero-copy', 'low-latency')]
+    [string] $ReceiveMode,
     [switch] $SkipPiSetup
 )
 
@@ -55,6 +57,8 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
     try { $previousConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
     catch { throw "Could not read existing USBHub client settings at $configPath - $($_.Exception.Message)" }
 }
+if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = [string]$previousConfig.ReceiveMode }
+if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = 'zero-copy' }
 
 $usbipExe = Join-Path $env:ProgramFiles 'USBip\usbip.exe'
 $x86UsbipExe = Join-Path ${env:ProgramFiles(x86)} 'USBip\usbip.exe'
@@ -148,6 +152,7 @@ $config = [ordered]@{
     PiUser       = $PiUser
     IdentityFile = $keyPath
     HostKeyAlias = $hostKeyAlias
+    ReceiveMode  = $ReceiveMode
 }
 $tempConfig = "$configPath.tmp"
 $config | ConvertTo-Json | Set-Content -LiteralPath $tempConfig -Encoding UTF8
@@ -169,6 +174,7 @@ if ($keyAuthExitCode -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the SSH public key on the Pi; the automatic tunnel was not configured.' }
 }
 Write-Host "Saved this hub as $PiUser@$PiAddress for the current Windows account."
+Write-Host "Saved USB/IP receive mode: $ReceiveMode. Change it with -ReceiveMode zero-copy or -ReceiveMode low-latency."
 
 $tunnelScript = Join-Path $installedUsbIpDir 'Start-UsbHubTunnel.ps1'
 $tunnelSource = @'
