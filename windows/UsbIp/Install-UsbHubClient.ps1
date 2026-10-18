@@ -52,9 +52,17 @@ $installerPath = Join-Path $downloadDir $asset
 $requiredVersion = [version]$version
 New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
 
-$previousConfig = $null
+$previousConfig = [pscustomobject]@{}
 if (Test-Path -LiteralPath $configPath -PathType Leaf) {
-    try { $previousConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
+    try {
+        $loadedConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        if ($null -ne $loadedConfig) {
+            if ($loadedConfig -isnot [pscustomobject]) {
+                throw 'The settings file must contain a JSON object.'
+            }
+            $previousConfig = $loadedConfig
+        }
+    }
     catch { throw "Could not read existing USBHub client settings at $configPath - $($_.Exception.Message)" }
 }
 if ([string]::IsNullOrWhiteSpace($ReceiveMode)) { $ReceiveMode = [string]$previousConfig.ReceiveMode }
@@ -115,6 +123,9 @@ Copy-Item -Path (Join-Path $PSScriptRoot '..\..\pi\usbip\*') -Destination $insta
 # invisible password prompt. Only the public key is installed on the Pi.
 $sshClient = Get-Command ssh.exe -ErrorAction SilentlyContinue
 if (-not $sshClient) { throw 'OpenSSH Client (ssh.exe) was not found. Install the Windows OpenSSH Client feature.' }
+$sshPath = [string]$sshClient.Source
+if ([string]::IsNullOrWhiteSpace($sshPath)) { $sshPath = [string]$sshClient.Path }
+if ([string]::IsNullOrWhiteSpace($sshPath)) { throw 'OpenSSH Client was found, but its executable path could not be resolved.' }
 $sshDir = Join-Path $env:USERPROFILE '.ssh'
 New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
 $keySuffix = ($PiAddress -replace '[^A-Za-z0-9.-]', '_')
@@ -140,7 +151,10 @@ elseif (-not (Test-Path -LiteralPath $publicKeyPath -PathType Leaf)) {
     & ssh-keygen.exe -y -f $keyPath | Set-Content -LiteralPath $publicKeyPath -Encoding ASCII
     if ($LASTEXITCODE -ne 0) { throw 'Could not derive the public SSH key for the USBHub tunnel.' }
 }
-$keyLine = (Get-Content -LiteralPath $publicKeyPath -Raw).Trim()
+$publicKeyContent = Get-Content -LiteralPath $publicKeyPath -Raw
+if ($null -eq $publicKeyContent) { throw "The SSH public key file is empty: $publicKeyPath" }
+$keyLine = $publicKeyContent.Trim()
+if ([string]::IsNullOrWhiteSpace($keyLine)) { throw "The SSH public key file is empty: $publicKeyPath" }
 $remoteKeyInstall = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF '$keyLine' ~/.ssh/authorized_keys || printf '%s\n' '$keyLine' >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys"
 $hostKeyAlias = [string]$previousConfig.HostKeyAlias
 if ([string]::IsNullOrWhiteSpace($hostKeyAlias)) {
@@ -162,7 +176,7 @@ $sshClient = Get-Command ssh.exe -ErrorAction Stop
 $savedErrorPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & $sshClient.Source -o BatchMode=yes -o "IdentityFile=$keyPath" -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" 'exit 0' 2>$null
+    & $sshPath -o BatchMode=yes -o "IdentityFile=$keyPath" -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" 'exit 0' 2>$null
     $keyAuthExitCode = $LASTEXITCODE
 }
 finally {
@@ -170,7 +184,7 @@ finally {
 }
 if ($keyAuthExitCode -ne 0) {
     Write-Host "Authorize this PC's public SSH key on the Pi. Enter the Pi account password when prompted."
-    & $sshClient.Source -o PreferredAuthentications=password -o PubkeyAuthentication=no -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" $remoteKeyInstall
+    & $sshPath -o PreferredAuthentications=password -o PubkeyAuthentication=no -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" $remoteKeyInstall
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the SSH public key on the Pi; the automatic tunnel was not configured.' }
 }
 Write-Host "Saved this hub as $PiUser@$PiAddress for the current Windows account."
@@ -198,11 +212,12 @@ while ($true) {
     Start-Sleep -Seconds 5
 }
 '@
-$tunnelSource = $tunnelSource.Replace('__USBHUB_SSH_EXE__', $sshClient.Source.Replace("'", "''"))
+$tunnelSource = $tunnelSource.Replace('__USBHUB_SSH_EXE__', $sshPath.Replace("'", "''"))
 Set-Content -LiteralPath $tunnelScript -Value $tunnelSource -Encoding UTF8
 
 $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $shell = New-Object -ComObject WScript.Shell
+if ($null -eq $shell) { throw 'Windows Script Host did not provide the shortcut service (WScript.Shell).' }
 foreach ($taskName in @('USBHub SSH Tunnel', 'USBHub Auto Connect')) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
@@ -210,6 +225,7 @@ foreach ($taskName in @('USBHub SSH Tunnel', 'USBHub Auto Connect')) {
 $startupDir = [Environment]::GetFolderPath('Startup')
 $startupShortcutPath = Join-Path $startupDir 'USBHub SSH Tunnel.lnk'
 $startupShortcut = $shell.CreateShortcut($startupShortcutPath)
+if ($null -eq $startupShortcut) { throw "Windows could not create the startup shortcut at $startupShortcutPath." }
 $startupShortcut.TargetPath = $powershellExe
 $startupShortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$tunnelScript`" -PiAddress `"$PiAddress`" -PiUser `"$PiUser`" -IdentityFile `"$keyPath`" -HostKeyAlias `"$hostKeyAlias`""
 $startupShortcut.WorkingDirectory = $installedUsbIpDir
@@ -241,6 +257,7 @@ Set-Content -LiteralPath $stopScript -Value $stopSource -Encoding UTF8
 $claimScript = Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'
 $autoShortcutPath = Join-Path $startupDir 'USBHub Auto Connect.lnk'
 $autoShortcut = $shell.CreateShortcut($autoShortcutPath)
+if ($null -eq $autoShortcut) { throw "Windows could not create the startup shortcut at $autoShortcutPath." }
 $autoShortcut.TargetPath = $powershellExe
 $autoShortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$claimScript`" -Action Auto -PiAddress `"$PiAddress`" -PiUser `"$PiUser`""
 $autoShortcut.WorkingDirectory = $installedUsbIpDir
@@ -251,6 +268,7 @@ $autoShortcut.Save()
 $desktop = [Environment]::GetFolderPath('Desktop')
 $shortcutPath = Join-Path $desktop 'Claim USBHub Device.lnk'
 $shortcut = $shell.CreateShortcut($shortcutPath)
+if ($null -eq $shortcut) { throw "Windows could not create the desktop shortcut at $shortcutPath." }
 $shortcut.TargetPath = $powershellExe
 $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$claimScript`" -Action Claim -Confirm:`$false"
 $shortcut.WorkingDirectory = $installedUsbIpDir
@@ -258,6 +276,7 @@ $shortcut.Description = 'Choose a USB device on the USBHub and claim it for this
 $shortcut.Save()
 $stopShortcutPath = Join-Path $desktop 'Stop USBHub Tunnel.lnk'
 $stopShortcut = $shell.CreateShortcut($stopShortcutPath)
+if ($null -eq $stopShortcut) { throw "Windows could not create the desktop shortcut at $stopShortcutPath." }
 $stopShortcut.TargetPath = $powershellExe
 $stopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$stopScript`" -TunnelScript `"$tunnelScript`" -AutoScript `"$claimScript`" -IdentityFile `"$keyPath`""
 $stopShortcut.WorkingDirectory = $installedUsbIpDir
