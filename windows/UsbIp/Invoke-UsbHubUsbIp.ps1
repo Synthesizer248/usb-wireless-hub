@@ -87,17 +87,65 @@ function Invoke-PiHelper {
     )
     Assert-SshClient
     if ($TargetBusId -notmatch '^[0-9]+-[0-9]+(\.[0-9]+)*$') { throw "Invalid USB bus ID: $TargetBusId" }
-    # A TTY lets sudo request the Pi account password when needed.
-    $sshArgs = @('-t') + (Get-SshIdentityArguments) + @("$script:PiUser@$script:PiAddress", "sudo $script:remoteHelper $Verb $TargetBusId")
-    & $script:ssh.Source @sshArgs
-    if ($LASTEXITCODE -ne 0) { throw "Pi USB/IP $Verb failed with exit code $LASTEXITCODE." }
+    # SetupPi grants this narrowly scoped helper passwordless sudo. Keep the
+    # operation non-interactive: the Device Center has no terminal attached,
+    # so ssh -t produces a misleading PTY warning and can hang on sudo.
+    $sshArgs = @('-T', '-o', 'BatchMode=yes') + (Get-SshIdentityArguments) + @(
+        "$script:PiUser@$script:PiAddress", "sudo -n $script:remoteHelper $Verb $TargetBusId")
+    $savedErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $rawOutput = @(& $script:ssh.Source @sshArgs 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $output = (@($rawOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+
+    if ($Verb -eq 'bind') {
+        if ($output -match '(?im)^\s*USBHUB_BIND_RESULT=newly-bound\s*$') { return $true }
+        if ($output -match '(?im)^\s*USBHUB_BIND_RESULT=already-bound\s*$') { return $false }
+        # Accept the exact benign response from older copies of the helper so
+        # users do not need to reinstall the Pi helper before retrying a claim.
+        if ($output -match '(?i)device on busid\s+[0-9]+-[0-9]+(?:\.[0-9]+)*\s+(?:is\s+)?already bound to usbip-host') { return $false }
+    }
+    else {
+        if ($output -match '(?im)^\s*USBHUB_UNBIND_RESULT=unbound\s*$') { return $true }
+        if ($output -match '(?im)^\s*USBHUB_UNBIND_RESULT=already-unbound\s*$') { return $false }
+        if ($output -match '(?i)device is not bound to usbip-host') { return $false }
+    }
+
+    if ($exitCode -ne 0) {
+        if ($output -match '(?i)sudo: a password is required|a terminal is required') {
+            throw "Pi USB/IP permissions are not configured. Run -Action SetupPi once. $output"
+        }
+        throw "Pi USB/IP $Verb failed for $TargetBusId (exit $exitCode): $output"
+    }
+    return $true
+}
+
+function Invoke-UsbIpClient {
+    param([Parameter(Mandatory = $true)][string[]] $UsbIpArguments)
+    Assert-UsbIpClient
+    $savedErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $rawOutput = @(& $script:usbip @UsbIpArguments 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    $output = (@($rawOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+    return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
 }
 
 function Get-PortBusId {
     param([Parameter(Mandatory = $true)][int] $ImportedPort)
-    Assert-UsbIpClient
-    $output = & $script:usbip port 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) { throw "Could not read imported USB/IP ports: $output" }
+    $result = Invoke-UsbIpClient -UsbIpArguments @('port')
+    if ($result.ExitCode -ne 0) { throw "Could not read imported USB/IP ports: $($result.Output)" }
+    $output = $result.Output
     $blocks = [regex]::Matches($output, '(?ms)^Port\s+0*(\d+):(?<body>.*?)(?=^Port\s+0*\d+:|\z)')
     foreach ($block in $blocks) {
         if ([int]$block.Groups[1].Value -ne $ImportedPort) { continue }
@@ -184,23 +232,7 @@ function Invoke-AutoPiHelper {
         [Parameter(Mandatory = $true)][ValidateSet('bind', 'unbind')][string] $Verb,
         [Parameter(Mandatory = $true)][string] $TargetBusId
     )
-    $sshArgs = @('-o', 'BatchMode=yes') + (Get-SshIdentityArguments)
-    $sshArgs += @("$script:PiUser@$script:PiAddress", "sudo -n $script:remoteHelper $Verb $TargetBusId")
-    # usbip writes a successful "bind complete" diagnostic to stderr. In
-    # Windows PowerShell, ErrorActionPreference=Stop can turn that diagnostic
-    # into a terminating NativeCommandError even though ssh returned success.
-    # Capture it while temporarily allowing native diagnostics, then make the
-    # exit code the single source of success or failure.
-    $savedErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $output = @(& $script:ssh.Source @sshArgs 2>&1)
-        $exitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $savedErrorActionPreference
-    }
-    if ($exitCode -ne 0) { throw "Pi $Verb failed for $TargetBusId (exit $exitCode): $($output -join ' ')" }
+    return Invoke-PiHelper -Verb $Verb -TargetBusId $TargetBusId
 }
 
 if ($Action -eq 'Inventory') {
@@ -260,8 +292,9 @@ if ($Action -eq 'Auto') {
                     Start-Sleep -Seconds 5
                     continue
                 }
-                $portOutput = (& $usbip port 2>&1 | Out-String)
-                if ($LASTEXITCODE -ne 0) { throw "Could not inspect current USB/IP imports: $portOutput" }
+                $portResult = Invoke-UsbIpClient -UsbIpArguments @('port')
+                if ($portResult.ExitCode -ne 0) { throw "Could not inspect current USB/IP imports: $($portResult.Output)" }
+                $portOutput = $portResult.Output
                 $attached = @([regex]::Matches($portOutput, 'usbip://[^/\s]+/([0-9]+-[0-9]+(?:\.[0-9]+)*)') | ForEach-Object { $_.Groups[1].Value })
                 $candidates = @(Get-AutoClaimCandidates)
                 $suppressed = Get-AutoClaimSuppressions
@@ -269,11 +302,14 @@ if ($Action -eq 'Auto') {
                     if (-not $candidate.Eligible -or $candidate.BusId -in $suppressed) { continue }
                     if ($candidate.BusId -in $attached) { continue }
                     try {
-                        Invoke-AutoPiHelper -Verb bind -TargetBusId $candidate.BusId
-                        $attachOutput = @(& $usbip attach -r $Server -b $candidate.BusId --receive-mode $ReceiveMode 2>&1)
-                        if ($LASTEXITCODE -ne 0) {
-                            Invoke-AutoPiHelper -Verb unbind -TargetBusId $candidate.BusId
-                            Write-AutoLog "Attach failed for $($candidate.BusId) $($candidate.VidPid): $($attachOutput -join ' ')"
+                        $newlyBound = [bool](Invoke-AutoPiHelper -Verb bind -TargetBusId $candidate.BusId)
+                        $attach = Invoke-UsbIpClient -UsbIpArguments @('attach', '-r', $Server, '-b', $candidate.BusId, '--receive-mode', $ReceiveMode)
+                        if ($attach.ExitCode -ne 0) {
+                            if ($newlyBound) {
+                                try { [void](Invoke-AutoPiHelper -Verb unbind -TargetBusId $candidate.BusId) }
+                                catch { Write-AutoLog "Cleanup unbind failed for $($candidate.BusId): $($_.Exception.Message)" }
+                            }
+                            Write-AutoLog "Attach failed for $($candidate.BusId) $($candidate.VidPid): $($attach.Output)"
                             continue
                         }
                         Write-AutoLog "Claimed $($candidate.BusId) $($candidate.VidPid) (classes $($candidate.Classes); drivers $($candidate.Drivers); receive mode $ReceiveMode)."
@@ -343,12 +379,17 @@ if ($Action -eq 'Claim') {
 
 switch ($Action) {
     'List' { & $usbip list -r $Server }
-    'Ports' { & $usbip port }
+    'Ports' {
+        $result = Invoke-UsbIpClient -UsbIpArguments @('port')
+        if ($result.ExitCode -ne 0) { throw "Could not read imported USB/IP ports: $($result.Output)" }
+        Write-Host $result.Output
+    }
     'Persist' {
         Write-Warning 'This saves every currently imported device for automatic reattachment on this PC. Disconnect anything you do not want this PC to claim again.'
         if ($PSCmdlet.ShouldProcess('all currently imported USB/IP devices', 'Save as persistent reconnect targets')) {
-            & $usbip port --stash
-            if ($LASTEXITCODE -ne 0) { throw "Could not save persistent USB/IP devices (exit $LASTEXITCODE)." }
+            $result = Invoke-UsbIpClient -UsbIpArguments @('port', '--stash')
+            if ($result.ExitCode -ne 0) { throw "Could not save persistent USB/IP devices (exit $($result.ExitCode)): $($result.Output)" }
+            if (-not [string]::IsNullOrWhiteSpace($result.Output)) { Write-Host $result.Output }
             Write-Host 'Current USB/IP imports are saved for automatic reattachment by the USBip driver.'
         }
     }
@@ -362,14 +403,18 @@ switch ($Action) {
         Write-Warning 'Connect transfers exclusive ownership to this PC. Do not select a device currently used by Pi HID/VHF or iSCSI.'
         Write-Host "USB/IP receive mode: $ReceiveMode"
         if ($PSCmdlet.ShouldProcess("Pi USB device $BusId", 'Export and connect to this PC')) {
-            Invoke-PiHelper -Verb bind -TargetBusId $BusId
+            $newlyBound = [bool](Invoke-PiHelper -Verb bind -TargetBusId $BusId)
             try {
-                & $usbip attach -r $Server -b $BusId --receive-mode $ReceiveMode
-                if ($LASTEXITCODE -ne 0) { throw "USB/IP attach failed with exit code $LASTEXITCODE." }
+                $attach = Invoke-UsbIpClient -UsbIpArguments @('attach', '-r', $Server, '-b', $BusId, '--receive-mode', $ReceiveMode)
+                if ($attach.ExitCode -ne 0) { throw "USB/IP attach failed with exit code $($attach.ExitCode): $($attach.Output)" }
+                if (-not [string]::IsNullOrWhiteSpace($attach.Output)) { Write-Host $attach.Output }
             }
             catch {
-                Write-Warning 'Attach failed; attempting to return the device to the Pi.'
-                Invoke-PiHelper -Verb unbind -TargetBusId $BusId
+                if ($newlyBound) {
+                    Write-Warning 'Attach failed; returning the newly created export to the Pi.'
+                    try { [void](Invoke-PiHelper -Verb unbind -TargetBusId $BusId) }
+                    catch { Write-Warning "Could not undo the new export: $($_.Exception.Message)" }
+                }
                 throw
             }
         }
@@ -377,7 +422,9 @@ switch ($Action) {
     'Attach' {
         if ([string]::IsNullOrWhiteSpace($BusId)) { throw 'Pass -BusId from List, for example -BusId 1-1.4.' }
         if ($BusId -notmatch '^[0-9]+-[0-9]+(\.[0-9]+)*$') { throw "Invalid USB bus ID: $BusId" }
-        & $usbip attach -r $Server -b $BusId --receive-mode $ReceiveMode
+        $result = Invoke-UsbIpClient -UsbIpArguments @('attach', '-r', $Server, '-b', $BusId, '--receive-mode', $ReceiveMode)
+        if ($result.ExitCode -ne 0) { throw "USB/IP attach failed with exit code $($result.ExitCode): $($result.Output)" }
+        if (-not [string]::IsNullOrWhiteSpace($result.Output)) { Write-Host $result.Output }
     }
     'Disconnect' {
         if ($Port -lt 1) { throw 'Pass the imported port from Ports, for example -Port 1.' }
@@ -385,19 +432,21 @@ switch ($Action) {
         Write-Warning 'For storage, use Windows Safely Remove Hardware and close files before disconnecting.'
         if ($PSCmdlet.ShouldProcess("USB/IP port $Port ($TargetBusId)", 'Disconnect and return device to the Pi')) {
             Add-AutoClaimSuppression -TargetBusId $TargetBusId
-            & $usbip detach -p $Port
-            if ($LASTEXITCODE -ne 0) { throw "USB/IP detach failed with exit code $LASTEXITCODE; export remains bound." }
-            Invoke-PiHelper -Verb unbind -TargetBusId $TargetBusId
+            $detach = Invoke-UsbIpClient -UsbIpArguments @('detach', '-p', [string]$Port)
+            if ($detach.ExitCode -ne 0) { throw "USB/IP detach failed with exit code $($detach.ExitCode); export remains bound. $($detach.Output)" }
+            if (-not [string]::IsNullOrWhiteSpace($detach.Output)) { Write-Host $detach.Output }
+            [void](Invoke-PiHelper -Verb unbind -TargetBusId $TargetBusId)
         }
     }
     'Release' {
         if ([string]::IsNullOrWhiteSpace($BusId)) { throw 'Pass -BusId for the exported device.' }
         if ($BusId -notmatch '^[0-9]+-[0-9]+(\.[0-9]+)*$') { throw "Invalid USB bus ID: $BusId" }
-        $ports = & $usbip port 2>&1 | Out-String
-        if ($ports -match [regex]::Escape("/$BusId")) { throw "Device $BusId is still attached. Disconnect it from Windows first." }
+        $ports = Invoke-UsbIpClient -UsbIpArguments @('port')
+        if ($ports.ExitCode -ne 0) { throw "Could not inspect imported USB/IP devices: $($ports.Output)" }
+        if ($ports.Output -match [regex]::Escape("/$BusId")) { throw "Device $BusId is still attached. Disconnect it from Windows first." }
         if ($PSCmdlet.ShouldProcess("Pi USB device $BusId", 'Unbind and return it to the Pi')) {
             Add-AutoClaimSuppression -TargetBusId $BusId
-            Invoke-PiHelper -Verb unbind -TargetBusId $BusId
+            [void](Invoke-PiHelper -Verb unbind -TargetBusId $BusId)
         }
     }
 }

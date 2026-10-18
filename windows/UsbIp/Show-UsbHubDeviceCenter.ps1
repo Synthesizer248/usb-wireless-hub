@@ -279,9 +279,17 @@ function Invoke-SelectedDeviceAction {
     if ($device.Kind -eq 'Storage') {
         $message += "`r`n`r`nThe Pi will refuse the transfer if Linux has the drive mounted. Safely eject it in Windows before returning it."
     }
+    if ($device.Kind -eq 'Webcam') {
+        $message += "`r`n`r`nThe camera will use low-latency USB/IP receive mode for live video. Camera streaming depends on the Pi USB host controller and Wi-Fi bandwidth."
+    }
     $answer = [System.Windows.Forms.MessageBox]::Show($message, 'Use USB device', 'YesNo', 'Warning')
     if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-    $command = '& {0} -Action Connect -BusId {1} -Confirm:$false' -f (ConvertTo-PowerShellLiteral $script:backendPath), (ConvertTo-PowerShellLiteral ([string]$device.BusId))
+    $receiveMode = [string]$script:config.ReceiveMode
+    if ($device.Kind -eq 'Webcam') { $receiveMode = 'low-latency' }
+    $command = '& {0} -Action Connect -BusId {1} -ReceiveMode {2} -Confirm:$false' -f `
+        (ConvertTo-PowerShellLiteral $script:backendPath),
+        (ConvertTo-PowerShellLiteral ([string]$device.BusId)),
+        (ConvertTo-PowerShellLiteral $receiveMode)
     Start-ChildPowerShell -Command $command -Kind Connect
 }
 

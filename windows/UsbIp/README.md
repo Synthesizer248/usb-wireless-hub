@@ -30,6 +30,14 @@ This copies the helper and asks the Pi to install it with `sudo`. The Pi must al
 
 This is the first device-class-agnostic connection workflow for the Raspberry Pi USBHub. USB/IP gives Windows the real USB device, so its normal Windows driver handles it; no per-device HID programming is needed. Compatibility still depends on the device, driver, USB transfer types, and Wi-Fi quality.
 
+## How this compares with VirtualHere
+
+VirtualHere documents the same user-facing model: a server shares a physical USB device, the client lists it, and the user chooses **Use**; the device then behaves like a locally connected USB device. USBHub implements that model with the open USB/IP protocol instead of VirtualHere's own server protocol. The Pi exports the physical device through `usbip-host`; its USB/IP daemon is restricted to loopback and the Windows client reaches it through the SSH tunnel. Device Center is the client-side list and **Use on this PC** action. After attachment, Windows enumerates the USB descriptors and loads its normal HID, camera, storage, or other class driver. The server and client are not wire-compatible with VirtualHere.
+
+VirtualHere also documents Bonjour auto-discovery and a client service/API. USBHub uses the Pi's mDNS hostname for discovery and runs a per-user Windows SSH tunnel at sign-in; the operator chooses which device to use. Both systems keep a device exclusive to one client at a time.
+
+References: [VirtualHere client workflow](https://www.virtualhere.com/usb_client_software), [VirtualHere server and Bonjour details](https://www.virtualhere.com/usb_server_software), [VirtualHere client API](https://www.virtualhere.com/client_api), [Linux USB/IP bind handling](https://github.com/torvalds/linux/blob/master/tools/usb/usbip/src/usbip_bind.c), and [Linux USB/IP isochronous transmit path](https://github.com/torvalds/linux/blob/master/drivers/usb/usbip/stub_tx.c).
+
 ## One-time Pi setup
 
 From Windows PowerShell, in the repository directory:
@@ -41,9 +49,11 @@ This copies pi/usbip/manage-usbhub-usbip.sh to /usr/local/sbin/manage-usbhub-usb
 
 ## Use after setup
 
-After signing in to Windows, the SSH tunnel runs in the background. Open USBHub Device Center from the desktop to see devices connected to the configured Pi. Select one and choose Use on this PC to transfer ownership to this PC; the Pi binds it through USB/IP and Windows loads its normal class driver. A device is exclusive to one PC until returned. The first PC whose operator requests it and wins the Pi bind gets it. Newly attached devices are not claimed in the background, so multiple PCs do not race each other.
+After signing in to Windows, the SSH tunnel runs in the background. Open USBHub Device Center from the desktop to see devices connected to the configured Pi. Select one and choose Use on this PC to transfer ownership to this PC; the Pi exports it through USB/IP and Windows loads its normal class driver. A device is exclusive to one PC until returned. The first PC whose attach succeeds owns the device; other requests fail without unbinding the active export. Newly attached devices are not claimed in the background, so PCs do not claim devices without an operator request.
 
-Device Center identifies HID input devices and warns that using one through USB/IP transfers it away from the Pi HID/VHF bridge. A device marked Unavailable / in use is not being offered by USB/IP; it may be in use by the Pi or another PC. The Pi helper refuses a storage device Linux currently has mounted. USB/IP compatibility varies by device class and transfer type.
+Device Center identifies HID input devices and warns that using one through USB/IP transfers it away from the Pi HID/VHF bridge. A device marked **On hub** is present but not yet exported; **Available** means it is exported and ready for a client request. If a different PC already owns an export, attach fails without unbinding that existing export. The Pi helper refuses a storage device Linux currently has mounted. USB/IP compatibility varies by device class and transfer type.
+
+Webcams are passed as USB devices, not as compressed video streams. Device Center selects low-latency receive mode for webcams. The development Pi previously logged `actual length of urb 0 does not match iso packet sizes 6144` while the camera was streaming; this is an isochronous USB/IP host-side failure, before Windows Camera can receive usable frames. Low-latency mode cannot correct that kernel-side mismatch. The Pi kernel module/image still needs an isochronous host fix and a camera retest before this camera can be claimed as working.
 
 The shortcuts use the installed copy of the client scripts, so the repository folder can be moved or removed after setup. Stop USBHub Tunnel stops the background tunnel for the current session; it starts again at the next Windows sign-in.
 

@@ -80,9 +80,30 @@ case "$action" in
                         ;;
                 esac
             done
-            exec usbip bind -b "$bus_id"
+            # Linux usbip bind is not idempotent: it exits with an error when
+            # this device was already exported. Treat that one exact state as
+            # success so another client can attempt the normal exclusive
+            # attach; never unbind an existing export just because attach
+            # later fails.
+            if output="$(usbip bind -b "$bus_id" 2>&1)"; then
+                [[ -z "$output" ]] || printf '%s\n' "$output" >&2
+                printf 'USBHUB_BIND_RESULT=newly-bound\n'
+            elif [[ "${output,,}" == *"already bound to usbip-host"* ]]; then
+                printf 'USBHUB_BIND_RESULT=already-bound\n'
+            else
+                printf '%s\n' "$output" >&2
+                exit 1
+            fi
         else
-            exec usbip unbind -b "$bus_id"
+            if output="$(usbip unbind -b "$bus_id" 2>&1)"; then
+                [[ -z "$output" ]] || printf '%s\n' "$output" >&2
+                printf 'USBHUB_UNBIND_RESULT=unbound\n'
+            elif [[ "${output,,}" == *"not bound to usbip-host"* ]]; then
+                printf 'USBHUB_UNBIND_RESULT=already-unbound\n'
+            else
+                printf '%s\n' "$output" >&2
+                exit 1
+            fi
         fi
         ;;
     *)
