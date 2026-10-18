@@ -10,7 +10,8 @@
 [CmdletBinding()]
 param(
     [string] $PiAddress,
-    [string] $PiUser = 'admin'
+    [string] $PiUser = 'admin',
+    [switch] $SkipPiSetup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +49,12 @@ $configPath = Join-Path $configDir 'client.json'
 $installerPath = Join-Path $downloadDir $asset
 $requiredVersion = [version]$version
 New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+
+$previousConfig = $null
+if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+    try { $previousConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
+    catch { throw "Could not read existing USBHub client settings at $configPath - $($_.Exception.Message)" }
+}
 
 $usbipExe = Join-Path $env:ProgramFiles 'USBip\usbip.exe'
 $x86UsbipExe = Join-Path ${env:ProgramFiles(x86)} 'USBip\usbip.exe'
@@ -89,16 +96,7 @@ if (-not (Test-Path -LiteralPath $usbipExe -PathType Leaf)) {
     throw 'The USBip installer completed, but usbip.exe was not found under Program Files.'
 }
 
-$config = [ordered]@{
-    PiAddress = $PiAddress
-    PiUser    = $PiUser
-}
-$tempConfig = "$configPath.tmp"
-$config | ConvertTo-Json | Set-Content -LiteralPath $tempConfig -Encoding UTF8
-Move-Item -LiteralPath $tempConfig -Destination $configPath -Force
-
 Write-Host "USBip client is ready at: $usbipExe"
-Write-Host "Saved this hub as $PiUser@$PiAddress for the current Windows account."
 
 # Keep the client scripts in the per-user app-data folder so shortcuts and the
 # logon task continue working if the source checkout is moved or removed.
@@ -116,7 +114,17 @@ if (-not $sshClient) { throw 'OpenSSH Client (ssh.exe) was not found. Install th
 $sshDir = Join-Path $env:USERPROFILE '.ssh'
 New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
 $keySuffix = ($PiAddress -replace '[^A-Za-z0-9.-]', '_')
-$keyPath = Join-Path $sshDir "usbhub_${keySuffix}_ed25519"
+$keyPath = Join-Path $sshDir ('usbhub_' + $keySuffix + '_ed25519')
+$previousAddress = [string]$previousConfig.PiAddress
+$previousUser = [string]$previousConfig.PiUser
+$previousIdentityFile = [string]$previousConfig.IdentityFile
+if ([string]::IsNullOrWhiteSpace($previousIdentityFile) -and -not [string]::IsNullOrWhiteSpace($previousAddress)) {
+    $previousKeySuffix = $previousAddress -replace '[^A-Za-z0-9.-]', '_'
+    $previousIdentityFile = Join-Path $sshDir ('usbhub_' + $previousKeySuffix + '_ed25519')
+}
+if (($previousUser -eq $PiUser) -and (Test-Path -LiteralPath $previousIdentityFile -PathType Leaf)) {
+    $keyPath = $previousIdentityFile
+}
 $publicKeyPath = "$keyPath.pub"
 if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
     $keygenPath = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
@@ -130,11 +138,26 @@ elseif (-not (Test-Path -LiteralPath $publicKeyPath -PathType Leaf)) {
 }
 $keyLine = (Get-Content -LiteralPath $publicKeyPath -Raw).Trim()
 $remoteKeyInstall = "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qxF '$keyLine' ~/.ssh/authorized_keys || printf '%s\n' '$keyLine' >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys"
+$hostKeyAlias = [string]$previousConfig.HostKeyAlias
+if ([string]::IsNullOrWhiteSpace($hostKeyAlias)) {
+    if (-not [string]::IsNullOrWhiteSpace($previousAddress)) { $hostKeyAlias = $previousAddress }
+    else { $hostKeyAlias = $PiAddress }
+}
+$config = [ordered]@{
+    PiAddress    = $PiAddress
+    PiUser       = $PiUser
+    IdentityFile = $keyPath
+    HostKeyAlias = $hostKeyAlias
+}
+$tempConfig = "$configPath.tmp"
+$config | ConvertTo-Json | Set-Content -LiteralPath $tempConfig -Encoding UTF8
+Move-Item -LiteralPath $tempConfig -Destination $configPath -Force
+
 $sshClient = Get-Command ssh.exe -ErrorAction Stop
 $savedErrorPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & $sshClient.Source -o BatchMode=yes -o "IdentityFile=$keyPath" "$PiUser@$PiAddress" 'exit 0' 2>$null
+    & $sshClient.Source -o BatchMode=yes -o "IdentityFile=$keyPath" -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" 'exit 0' 2>$null
     $keyAuthExitCode = $LASTEXITCODE
 }
 finally {
@@ -142,9 +165,10 @@ finally {
 }
 if ($keyAuthExitCode -ne 0) {
     Write-Host "Authorize this PC's public SSH key on the Pi. Enter the Pi account password when prompted."
-    & $sshClient.Source -o PreferredAuthentications=password -o PubkeyAuthentication=no "$PiUser@$PiAddress" $remoteKeyInstall
+    & $sshClient.Source -o PreferredAuthentications=password -o PubkeyAuthentication=no -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" $remoteKeyInstall
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the SSH public key on the Pi; the automatic tunnel was not configured.' }
 }
+Write-Host "Saved this hub as $PiUser@$PiAddress for the current Windows account."
 
 $tunnelScript = Join-Path $installedUsbIpDir 'Start-UsbHubTunnel.ps1'
 $tunnelSource = @'
@@ -152,16 +176,18 @@ $tunnelSource = @'
 param(
     [Parameter(Mandatory = $true)][string] $PiAddress,
     [Parameter(Mandatory = $true)][string] $PiUser,
-    [Parameter(Mandatory = $true)][string] $IdentityFile
+    [Parameter(Mandatory = $true)][string] $IdentityFile,
+    [Parameter(Mandatory = $true)][string] $HostKeyAlias
 )
 $ErrorActionPreference = 'Continue'
 $logFile = Join-Path $env:LOCALAPPDATA 'UsbHub\tunnel.log'
 $sshPath = '__USBHUB_SSH_EXE__'
 while ($true) {
     "$(Get-Date -Format o) Starting SSH tunnel to $PiAddress" | Add-Content -LiteralPath $logFile
-    & $sshPath -N -T -i $IdentityFile -o BatchMode=yes -o ExitOnForwardFailure=yes `
-        -o ServerAliveInterval=30 -o ServerAliveCountMax=3 `
-        -L '3240:127.0.0.1:3240' "$PiUser@$PiAddress" 2>> $logFile
+    $sshArgs = @('-N', '-T', '-i', $IdentityFile, '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes',
+        '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3', '-o', "HostKeyAlias=$HostKeyAlias",
+        '-L', '3240:127.0.0.1:3240', "$PiUser@$PiAddress")
+    & $sshPath @sshArgs 2>> $logFile
     "$(Get-Date -Format o) SSH exited with code $LASTEXITCODE; retrying shortly" | Add-Content -LiteralPath $logFile
     Start-Sleep -Seconds 5
 }
@@ -171,14 +197,15 @@ Set-Content -LiteralPath $tunnelScript -Value $tunnelSource -Encoding UTF8
 
 $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $shell = New-Object -ComObject WScript.Shell
-$taskName = 'USBHub SSH Tunnel'
-Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+foreach ($taskName in @('USBHub SSH Tunnel', 'USBHub Auto Connect')) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+}
 
 $startupDir = [Environment]::GetFolderPath('Startup')
 $startupShortcutPath = Join-Path $startupDir 'USBHub SSH Tunnel.lnk'
 $startupShortcut = $shell.CreateShortcut($startupShortcutPath)
 $startupShortcut.TargetPath = $powershellExe
-$startupShortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$tunnelScript`" -PiAddress `"$PiAddress`" -PiUser `"$PiUser`" -IdentityFile `"$keyPath`""
+$startupShortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$tunnelScript`" -PiAddress `"$PiAddress`" -PiUser `"$PiUser`" -IdentityFile `"$keyPath`" -HostKeyAlias `"$hostKeyAlias`""
 $startupShortcut.WorkingDirectory = $installedUsbIpDir
 $startupShortcut.Description = 'Starts and maintains the USBHub SSH tunnel at Windows sign-in.'
 $startupShortcut.WindowStyle = 7
@@ -192,6 +219,8 @@ param(
     [Parameter(Mandatory = $true)][string] $IdentityFile
 )
 $ErrorActionPreference = 'SilentlyContinue'
+Stop-ScheduledTask -TaskName 'USBHub Auto Connect'
+Stop-ScheduledTask -TaskName 'USBHub SSH Tunnel'
 $runners = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
     Where-Object { $_.CommandLine -and ($_.CommandLine.Contains($TunnelScript) -or ($_.CommandLine.Contains($AutoScript) -and $_.CommandLine.Contains('-Action Auto'))) })
 $runners | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
@@ -229,15 +258,20 @@ $stopShortcut.WorkingDirectory = $installedUsbIpDir
 $stopShortcut.Description = 'Stops the USBHub SSH tunnel until the next Windows sign-in.'
 $stopShortcut.Save()
 
-Write-Host 'Configuring the Pi safety helper and unattended USB/IP permission (enter the Pi sudo password if requested)...'
-& $powershellExe -NoProfile -ExecutionPolicy Bypass -File $claimScript -Action SetupPi -PiAddress $PiAddress -PiUser $PiUser
-if ($LASTEXITCODE -ne 0) { throw 'Could not configure the Pi USB/IP safety helper; automatic claiming was not started.' }
+if (-not $SkipPiSetup) {
+    Write-Host 'Configuring the Pi safety helper and unattended USB/IP permission (enter the Pi sudo password if requested)...'
+    & $powershellExe -NoProfile -ExecutionPolicy Bypass -File $claimScript -Action SetupPi -PiAddress $PiAddress -PiUser $PiUser
+    if ($LASTEXITCODE -ne 0) { throw 'Could not configure the Pi USB/IP safety helper; automatic claiming was not started.' }
+}
+else {
+    Write-Host 'Skipping Pi-side setup; using the existing USB/IP safety helper and permission.'
+}
 
 & $powershellExe -NoProfile -ExecutionPolicy Bypass -File $stopScript -TunnelScript $tunnelScript -AutoScript $claimScript -IdentityFile $keyPath
 Start-Process -FilePath $powershellExe -ArgumentList $startupShortcut.Arguments -WindowStyle Hidden
 Start-Process -FilePath $powershellExe -ArgumentList $autoShortcut.Arguments -WindowStyle Hidden
 
-Write-Host 'The SSH tunnel and automatic USB device claiming start at Windows sign-in.'
+Write-Host 'The hidden SSH tunnel and automatic USB device scanner start now and at Windows sign-in.'
 Write-Host "USBHub Auto Connect claims eligible devices for the first PC to win the Pi bind race."
 Write-Host "Use the desktop shortcut '$shortcutPath' only when you want to choose a device manually."
 Write-Host "Use '$stopShortcutPath' to stop the tunnel for the current session."

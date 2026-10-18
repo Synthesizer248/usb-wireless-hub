@@ -6,7 +6,7 @@ The project includes a one-command client bootstrap for Windows x64 and ARM64. F
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress 192.168.1.100
+.\windows\UsbIp\Install-UsbHubClient.ps1 -PiAddress usbwirelesshub.local
 ```
 
 The bootstrap downloads the pinned USBip release from its upstream GitHub release, checks the SHA-256 digest and Authenticode signature, then opens the vendor installer with a UAC prompt. The installer may briefly restart USB hubs; save work and pause USB transfers first. Windows administrator approval is required to install a kernel driver. The Pi address is saved per Windows account so later commands do not need it repeated. It also installs the Pi-side storage guard and a narrowly scoped sudo rule for automatic claims.

@@ -29,6 +29,8 @@ if (Test-Path -LiteralPath $clientConfigPath -PathType Leaf) {
     }
     if ([string]::IsNullOrWhiteSpace($PiAddress)) { $PiAddress = [string]$clientConfig.PiAddress }
     if ([string]::IsNullOrWhiteSpace($PiUser)) { $PiUser = [string]$clientConfig.PiUser }
+    $script:PiHostKeyAlias = [string]$clientConfig.HostKeyAlias
+    $script:PiIdentityFile = [string]$clientConfig.IdentityFile
 }
 if ([string]::IsNullOrWhiteSpace($PiUser)) { $PiUser = 'admin' }
 
@@ -59,12 +61,19 @@ function Assert-UsbIpClient {
 }
 
 function Get-SshIdentityArguments {
-    $keySuffix = $script:PiAddress -replace '[^A-Za-z0-9.-]', '_'
-    $identityFile = Join-Path $env:USERPROFILE ".ssh\usbhub_${keySuffix}_ed25519"
-    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
-        return @('-o', "IdentityFile=$identityFile")
+    $identityFile = $script:PiIdentityFile
+    if ([string]::IsNullOrWhiteSpace($identityFile)) {
+        $keySuffix = $script:PiAddress -replace '[^A-Za-z0-9.-]', '_'
+        $identityFile = Join-Path $env:USERPROFILE ('.ssh\usbhub_' + $keySuffix + '_ed25519')
     }
-    return @()
+    $arguments = @()
+    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
+        $arguments += @('-o', "IdentityFile=$identityFile")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:PiHostKeyAlias)) {
+        $arguments += @('-o', "HostKeyAlias=$script:PiHostKeyAlias")
+    }
+    return $arguments
 }
 
 function Invoke-PiHelper {
@@ -141,12 +150,7 @@ function Get-AutoClaimSuppressions {
 function Get-AutoClaimCandidates {
     Assert-PiTarget
     Assert-SshClient
-    $keySuffix = $script:PiAddress -replace '[^A-Za-z0-9.-]', '_'
-    $identityFile = Join-Path $env:USERPROFILE ".ssh\usbhub_${keySuffix}_ed25519"
-    $sshArgs = @('-o', 'BatchMode=yes')
-    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
-        $sshArgs += @('-o', "IdentityFile=$identityFile")
-    }
+    $sshArgs = @('-o', 'BatchMode=yes') + (Get-SshIdentityArguments)
     $sshArgs += @("$script:PiUser@$script:PiAddress", "$script:remoteHelper inventory")
     $lines = @(& $script:ssh.Source @sshArgs 2>&1)
     if ($LASTEXITCODE -ne 0) {
@@ -176,12 +180,7 @@ function Invoke-AutoPiHelper {
         [Parameter(Mandatory = $true)][ValidateSet('bind', 'unbind')][string] $Verb,
         [Parameter(Mandatory = $true)][string] $TargetBusId
     )
-    $keySuffix = $script:PiAddress -replace '[^A-Za-z0-9.-]', '_'
-    $identityFile = Join-Path $env:USERPROFILE ".ssh\usbhub_${keySuffix}_ed25519"
-    $sshArgs = @('-o', 'BatchMode=yes')
-    if (Test-Path -LiteralPath $identityFile -PathType Leaf) {
-        $sshArgs += @('-o', "IdentityFile=$identityFile")
-    }
+    $sshArgs = @('-o', 'BatchMode=yes') + (Get-SshIdentityArguments)
     $sshArgs += @("$script:PiUser@$script:PiAddress", "sudo -n $script:remoteHelper $Verb $TargetBusId")
     # usbip writes a successful "bind complete" diagnostic to stderr. In
     # Windows PowerShell, ErrorActionPreference=Stop can turn that diagnostic
