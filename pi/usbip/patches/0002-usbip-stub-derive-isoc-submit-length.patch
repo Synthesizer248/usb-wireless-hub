@@ -12,7 +12,8 @@ exceed the transfer buffer. This keeps the protocol length consistent with the
 payload and descriptor data sent on the wire.
 
 Based on Raspberry Pi Linux rpi-6.18.y drivers/usb/usbip/stub_tx.c.
-This patch has not yet been built or validated on the target camera.
+Built on the development Pi for its running 6.18.54-v8-usbiscsi+ kernel;
+not installed, loaded, or validated with the camera yet.
 diff --git a/drivers/usb/usbip/stub_tx.c b/drivers/usb/usbip/stub_tx.c
 index 7eb2e07..49e86bf 100644
 --- a/drivers/usb/usbip/stub_tx.c

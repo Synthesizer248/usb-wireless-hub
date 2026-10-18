@@ -19,11 +19,17 @@ limits.
 
 ## Build and deployment status
 
-These are source patches only. The current downloadable Pi image still uses
-Raspberry Pi OS's packaged kernel modules and does not include patch 0002. The
-patch has not yet been built, installed, or validated with the camera. Do not
-assume camera support is working until a patched module is built against the
-exact running kernel, loaded, and the UVC stream succeeds on the target Pi and
+Patch 0002 was applied and built on the development Pi against its exact running
+kernel, `6.18.54-v8-usbiscsi+` (Raspberry Pi Zero 2 W). Both `usbip-core.ko`
+and `usbip-host.ko` are AArch64 modules and report matching `vermagic` for that
+release. This confirms build/kernel compatibility.
+
+The modules have not been installed or loaded, and the camera has not been
+retested. Three USB/IP devices, including SanDisk storage, were attached from
+Windows during the build, so module reload was deferred to avoid abruptly
+disconnecting storage. The current downloadable Pi image still uses packaged
+kernel modules and does not include patch 0002. Do not treat webcam support as
+fixed until the modules are deployed and the UVC stream succeeds on the Pi and
 Windows PC.
 
 Apply patch 0002 to the matching Raspberry Pi Linux source tree and rebuild the
