@@ -211,7 +211,26 @@ $clientRoot = Join-Path $configDir 'client'
 $installedUsbIpDir = Join-Path $clientRoot 'windows\UsbIp'
 $installedPiUsbIpDir = Join-Path $clientRoot 'pi\usbip'
 New-Item -ItemType Directory -Path $installedUsbIpDir, $installedPiUsbIpDir -Force | Out-Null
-Copy-Item -Path (Join-Path $PSScriptRoot '*.ps1') -Destination $installedUsbIpDir -Force
+$requiredSourceScripts = @(
+    'Install-UsbHubClient.ps1',
+    'Invoke-UsbHubUsbIp.ps1',
+    'Resolve-UsbHubPiAddress.ps1',
+    'Show-UsbHubDeviceCenter.ps1'
+)
+foreach ($scriptName in $requiredSourceScripts) {
+    $sourceScript = Join-Path $PSScriptRoot $scriptName
+    if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) {
+        throw "USBHub client source file is missing: $sourceScript"
+    }
+    Copy-Item -LiteralPath $sourceScript -Destination $installedUsbIpDir -Force
+}
+$missingCopiedScripts = @($requiredSourceScripts | ForEach-Object {
+    $installedScript = Join-Path $installedUsbIpDir $_
+    if (-not (Test-Path -LiteralPath $installedScript -PathType Leaf)) { $installedScript }
+})
+if ($missingCopiedScripts.Count -gt 0) {
+    throw "USBHub client installation did not copy required files: $($missingCopiedScripts -join ', ')"
+}
 Copy-Item -Path (Join-Path $PSScriptRoot '..\..\pi\usbip\*') -Destination $installedPiUsbIpDir -Force
 
 # Establish key-based SSH once so the hidden logon tunnel does not wait for an
@@ -406,6 +425,18 @@ if ($remainingTunnels.Count -gt 0) {
 Write-Host 'USBHub SSH tunnel stopped for this Windows session.'
 '@
 Set-Content -LiteralPath $stopScript -Value $stopSource -Encoding UTF8
+
+$requiredInstalledScripts = @(
+    (Join-Path $installedUsbIpDir 'Resolve-UsbHubPiAddress.ps1'),
+    (Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'),
+    (Join-Path $installedUsbIpDir 'Show-UsbHubDeviceCenter.ps1'),
+    $tunnelScript,
+    $stopScript
+)
+$missingInstalledScripts = @($requiredInstalledScripts | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+if ($missingInstalledScripts.Count -gt 0) {
+    throw "USBHub client installation is incomplete. Missing: $($missingInstalledScripts -join ', ')"
+}
 
 $claimScript = Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'
 $desktop = [Environment]::GetFolderPath('Desktop')

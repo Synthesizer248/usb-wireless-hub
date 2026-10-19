@@ -34,11 +34,17 @@ catch {
         "Could not read USBHub settings: $($_.Exception.Message)", 'USBHub setup error', 'OK', 'Error')
     exit 1
 }
-if (-not (Test-Path -LiteralPath $script:networkResolverPath -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $script:backendPath -PathType Leaf) -or
-    -not (Test-Path -LiteralPath $script:tunnelPath -PathType Leaf)) {
+$requiredClientPaths = @(
+    $script:networkResolverPath,
+    $script:backendPath,
+    $script:tunnelPath
+)
+$missingClientPaths = @($requiredClientPaths | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+if ($missingClientPaths.Count -gt 0) {
+    $missingList = $missingClientPaths -join [Environment]::NewLine
+    $message = "USBHub client files are incomplete. Missing:`r`n$missingList`r`n`r`nChecked folder: $script:clientRoot`r`nRe-run Install-UsbHubClient.ps1."
     [void][System.Windows.Forms.MessageBox]::Show(
-        'USBHub client files are incomplete. Re-run Install-UsbHubClient.ps1.', 'USBHub setup needed', 'OK', 'Warning')
+        $message, 'USBHub setup needed', 'OK', 'Warning')
     exit 1
 }
 if (-not $script:sshPath -or -not (Test-Path -LiteralPath $script:usbipPath -PathType Leaf)) {
