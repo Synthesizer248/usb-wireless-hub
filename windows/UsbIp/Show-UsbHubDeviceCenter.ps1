@@ -8,10 +8,14 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $script:configPath = Join-Path $env:LOCALAPPDATA 'UsbHub\client.json'
-$script:clientRoot = Join-Path $env:LOCALAPPDATA 'UsbHub\client'
-$script:networkResolverPath = Join-Path $script:clientRoot 'windows\UsbIp\Resolve-UsbHubPiAddress.ps1'
-$script:backendPath = Join-Path $script:clientRoot 'windows\UsbIp\Invoke-UsbHubUsbIp.ps1'
-$script:tunnelPath = Join-Path $script:clientRoot 'windows\UsbIp\Start-UsbHubTunnel.ps1'
+# Resolve bundled scripts beside this entry point. LOCALAPPDATA is only for
+# per-user settings; using it as the executable base can point the GUI at a
+# different install when launched elevated or from a stale environment.
+$script:scriptDirectory = $PSScriptRoot
+$script:clientRoot = Split-Path -Parent (Split-Path -Parent $script:scriptDirectory)
+$script:networkResolverPath = Join-Path $script:scriptDirectory 'Resolve-UsbHubPiAddress.ps1'
+$script:backendPath = Join-Path $script:scriptDirectory 'Invoke-UsbHubUsbIp.ps1'
+$script:tunnelPath = Join-Path $script:scriptDirectory 'Start-UsbHubTunnel.ps1'
 $script:powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $script:sshPath = (Get-Command ssh.exe -ErrorAction SilentlyContinue).Source
 $script:usbipPath = Join-Path $env:ProgramFiles 'USBip\usbip.exe'
@@ -39,10 +43,10 @@ $requiredClientPaths = @(
     $script:backendPath,
     $script:tunnelPath
 )
-$missingClientPaths = @($requiredClientPaths | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+$missingClientPaths = @($requiredClientPaths | Where-Object { -not [System.IO.File]::Exists($_) })
 if ($missingClientPaths.Count -gt 0) {
     $missingList = $missingClientPaths -join [Environment]::NewLine
-    $message = "USBHub client files are incomplete. Missing:`r`n$missingList`r`n`r`nChecked folder: $script:clientRoot`r`nRe-run Install-UsbHubClient.ps1."
+    $message = "USBHub client files are incomplete. Missing:`r`n$missingList`r`n`r`nChecked folder: $script:scriptDirectory`r`nRe-run Install-UsbHubClient.ps1."
     [void][System.Windows.Forms.MessageBox]::Show(
         $message, 'USBHub setup needed', 'OK', 'Warning')
     exit 1
