@@ -21,6 +21,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$networkResolver = Join-Path $PSScriptRoot 'Resolve-UsbHubPiAddress.ps1'
+if (-not (Test-Path -LiteralPath $networkResolver -PathType Leaf)) {
+    throw "USBHub network resolver is missing: $networkResolver. Re-run Install-UsbHubClient.ps1."
+}
+. $networkResolver
+
 $clientConfigPath = Join-Path $env:LOCALAPPDATA 'UsbHub\client.json'
 if (Test-Path -LiteralPath $clientConfigPath -PathType Leaf) {
     try {
@@ -63,6 +69,11 @@ function Assert-PiTarget {
     if ($script:PiUser -match '[\s/@]') { throw 'Pi SSH user contains invalid characters.' }
 }
 
+function Get-PiConnectAddress {
+    Assert-PiTarget
+    return Resolve-UsbHubPiAddress -Address $script:PiAddress
+}
+
 function Assert-UsbIpClient {
     if (-not $script:usbip) { throw 'usbip.exe was not found. Run windows/UsbIp/Install-UsbHubClient.ps1 first.' }
 }
@@ -94,7 +105,7 @@ function Invoke-PiHelper {
     # operation non-interactive: the Device Center has no terminal attached,
     # so ssh -t produces a misleading PTY warning and can hang on sudo.
     $sshArgs = @('-T', '-o', 'BatchMode=yes') + (Get-SshIdentityArguments) + @(
-        "$script:PiUser@$script:PiAddress", "sudo -n $script:remoteHelper $Verb $TargetBusId")
+        "$script:PiUser@$(Get-PiConnectAddress)", "sudo -n $script:remoteHelper $Verb $TargetBusId")
     $savedErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -206,7 +217,7 @@ function Get-AutoClaimCandidates {
     Assert-PiTarget
     Assert-SshClient
     $sshArgs = @('-o', 'BatchMode=yes') + (Get-SshIdentityArguments)
-    $sshArgs += @("$script:PiUser@$script:PiAddress", "$script:remoteHelper inventory")
+    $sshArgs += @("$script:PiUser@$(Get-PiConnectAddress)", "$script:remoteHelper inventory")
     $lines = @(& $script:ssh.Source @sshArgs 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "Pi auto-inventory failed: $($lines -join ' ')"
@@ -242,7 +253,7 @@ if ($Action -eq 'Inventory') {
     Assert-PiTarget
     Assert-SshClient
     Write-Host "USB devices on $PiUser@$PiAddress (read-only):"
-    $sshArgs = (Get-SshIdentityArguments) + @("$PiUser@$PiAddress", '/usr/sbin/usbip list --local')
+    $sshArgs = (Get-SshIdentityArguments) + @("$PiUser@$(Get-PiConnectAddress)", '/usr/sbin/usbip list --local')
     & $ssh.Source @sshArgs
     if ($LASTEXITCODE -ne 0) { throw "Pi inventory failed with exit code $LASTEXITCODE." }
     exit 0
@@ -252,7 +263,7 @@ if ($Action -eq 'Tunnel') {
     Assert-PiTarget
     Assert-SshClient
     Write-Host ('Opening SSH tunnel localhost:3240 to ' + $PiAddress + ':3240. Keep this window open; Ctrl+C closes it.')
-    $sshArgs = @('-N', '-L', '3240:127.0.0.1:3240') + (Get-SshIdentityArguments) + @("$PiUser@$PiAddress")
+    $sshArgs = @('-N', '-L', '3240:127.0.0.1:3240') + (Get-SshIdentityArguments) + @("$PiUser@$(Get-PiConnectAddress)")
     & $ssh.Source @sshArgs
     exit $LASTEXITCODE
 }
@@ -263,7 +274,7 @@ if ($Action -eq 'SetupPi') {
     if (-not $scp) { throw 'OpenSSH scp.exe was not found.' }
     if (-not (Test-Path -LiteralPath $piHelper -PathType Leaf)) { throw "Pi safety helper not found: $piHelper" }
     $remoteTemp = '/tmp/manage-usbhub-usbip.sh'
-    $remoteSpec = $PiUser + '@' + $PiAddress + ':' + $remoteTemp
+    $remoteSpec = $PiUser + '@' + (Get-PiConnectAddress) + ':' + $remoteTemp
     $scpArgs = (Get-SshIdentityArguments) + @($piHelper, $remoteSpec)
     & $scp.Source @scpArgs
     if ($LASTEXITCODE -ne 0) { throw "Could not copy the Pi helper (exit $LASTEXITCODE)." }
@@ -271,7 +282,7 @@ if ($Action -eq 'SetupPi') {
     $sudoersRule = "$PiUser ALL=(root) NOPASSWD: $remoteHelper bind *, $remoteHelper unbind *`n"
     $sudoersBase64 = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($sudoersRule))
     $setupCommand = "sudo install -o root -g root -m 0755 $remoteTemp $remoteHelper && rm -f $remoteTemp && printf '%s' '$sudoersBase64' | base64 -d > /tmp/usbhub-usbip.sudoers && sudo visudo -cf /tmp/usbhub-usbip.sudoers && sudo install -o root -g root -m 0440 /tmp/usbhub-usbip.sudoers /etc/sudoers.d/usbhub-usbip && rm -f /tmp/usbhub-usbip.sudoers && sudo visudo -cf /etc/sudoers.d/usbhub-usbip"
-    $sshArgs = @('-t') + (Get-SshIdentityArguments) + @("$PiUser@$PiAddress", $setupCommand)
+    $sshArgs = @('-t') + (Get-SshIdentityArguments) + @("$PiUser@$(Get-PiConnectAddress)", $setupCommand)
     & $ssh.Source @sshArgs
     if ($LASTEXITCODE -ne 0) { throw "Could not install the Pi helper (exit $LASTEXITCODE)." }
     Write-Host "Installed the mounted-storage safety helper and scoped unattended bind permission on the Pi."

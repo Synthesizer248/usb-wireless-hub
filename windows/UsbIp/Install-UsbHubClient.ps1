@@ -17,6 +17,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$networkResolverPath = Join-Path $PSScriptRoot 'Resolve-UsbHubPiAddress.ps1'
+if (-not (Test-Path -LiteralPath $networkResolverPath -PathType Leaf)) {
+    throw "USBHub network resolver is missing: $networkResolverPath"
+}
+. $networkResolverPath
 
 if ([string]::IsNullOrWhiteSpace($PiAddress)) {
     $PiAddress = Read-Host 'Enter the USBHub Raspberry Pi IP address or host name'
@@ -27,6 +32,7 @@ if ([string]::IsNullOrWhiteSpace($PiAddress) -or $PiAddress -match '[\s/@]') {
 if ([string]::IsNullOrWhiteSpace($PiUser) -or $PiUser -match '[\s/@]') {
     throw 'Enter a valid SSH user name.'
 }
+$PiConnectAddress = Resolve-UsbHubPiAddress -Address $PiAddress
 
 $architecture = $null
 try {
@@ -265,7 +271,7 @@ $sshClient = Get-Command ssh.exe -ErrorAction Stop
 $savedErrorPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & $sshPath -o BatchMode=yes -o "IdentityFile=$keyPath" -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" 'exit 0' 2>$null
+    & $sshPath -o BatchMode=yes -o "IdentityFile=$keyPath" -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiConnectAddress" 'exit 0' 2>$null
     $keyAuthExitCode = $LASTEXITCODE
 }
 finally {
@@ -273,8 +279,32 @@ finally {
 }
 if ($keyAuthExitCode -ne 0) {
     Write-Host "Authorize this PC's public SSH key on the Pi. Enter the Pi account password when prompted."
-    & $sshPath -o PreferredAuthentications=password -o PubkeyAuthentication=no -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiAddress" $remoteKeyInstall
+    & $sshPath -o PreferredAuthentications=password -o PubkeyAuthentication=no -o "HostKeyAlias=$hostKeyAlias" "$PiUser@$PiConnectAddress" $remoteKeyInstall
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the SSH public key on the Pi; the automatic tunnel was not configured.' }
+}
+
+# Store the Pi's mDNS name after bootstrapping by IP so a later DHCP address
+# change does not strand the saved tunnel on the address used during install.
+$remoteNameOutput = @(& $sshPath -o BatchMode=yes -o "IdentityFile=$keyPath" -o "HostKeyAlias=$hostKeyAlias" `
+    "$PiUser@$PiConnectAddress" 'hostnamectl --static' 2>$null)
+if ($LASTEXITCODE -eq 0 -and $remoteNameOutput.Count -gt 0) {
+    $remoteName = ([string]$remoteNameOutput[0]).Trim()
+    if ($remoteName -match '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$') {
+        $candidatePiAddress = "$remoteName.local"
+        try {
+            $candidateConnectAddress = Resolve-UsbHubPiAddress -Address $candidatePiAddress
+            if ($candidateConnectAddress -eq $PiConnectAddress) {
+                $PiAddress = $candidatePiAddress
+                $config.PiAddress = $PiAddress
+                $tempConfig = "$configPath.tmp"
+                $config | ConvertTo-Json | Set-Content -LiteralPath $tempConfig -Encoding UTF8
+                Move-Item -LiteralPath $tempConfig -Destination $configPath -Force
+            }
+        }
+        catch {
+            Write-Warning "Could not verify the Pi mDNS name $candidatePiAddress; keeping the configured address."
+        }
+    }
 }
 Write-Host "Saved this hub as $PiUser@$PiAddress for the current Windows account."
 Write-Host "Saved USB/IP receive mode: $ReceiveMode. Change it with -ReceiveMode zero-copy or -ReceiveMode low-latency."
@@ -289,13 +319,26 @@ param(
     [Parameter(Mandatory = $true)][string] $HostKeyAlias
 )
 $ErrorActionPreference = 'Continue'
+$networkResolver = Join-Path $PSScriptRoot 'Resolve-UsbHubPiAddress.ps1'
+if (-not (Test-Path -LiteralPath $networkResolver -PathType Leaf)) {
+    throw "USBHub network resolver is missing: $networkResolver"
+}
+. $networkResolver
 $logFile = Join-Path $env:LOCALAPPDATA 'UsbHub\tunnel.log'
 $sshPath = '__USBHUB_SSH_EXE__'
 while ($true) {
-    "$(Get-Date -Format o) Starting SSH tunnel to $PiAddress" | Add-Content -LiteralPath $logFile
+    try {
+        $connectAddress = Resolve-UsbHubPiAddress -Address $PiAddress
+    }
+    catch {
+        "$(Get-Date -Format o) Could not resolve $PiAddress`: $($_.Exception.Message); retrying shortly" | Add-Content -LiteralPath $logFile
+        Start-Sleep -Seconds 5
+        continue
+    }
+    "$(Get-Date -Format o) Starting SSH tunnel to $PiAddress ($connectAddress)" | Add-Content -LiteralPath $logFile
     $sshArgs = @('-N', '-T', '-i', $IdentityFile, '-o', 'BatchMode=yes', '-o', 'ExitOnForwardFailure=yes',
         '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3', '-o', "HostKeyAlias=$HostKeyAlias",
-        '-L', '3240:127.0.0.1:3240', "$PiUser@$PiAddress")
+        '-L', '3240:127.0.0.1:3240', "$PiUser@$connectAddress")
     & $sshPath @sshArgs 2>> $logFile
     "$(Get-Date -Format o) SSH exited with code $LASTEXITCODE; retrying shortly" | Add-Content -LiteralPath $logFile
     Start-Sleep -Seconds 5

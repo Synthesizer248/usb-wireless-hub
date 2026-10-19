@@ -9,6 +9,7 @@ Add-Type -AssemblyName System.Drawing
 
 $script:configPath = Join-Path $env:LOCALAPPDATA 'UsbHub\client.json'
 $script:clientRoot = Join-Path $env:LOCALAPPDATA 'UsbHub\client'
+$script:networkResolverPath = Join-Path $script:clientRoot 'windows\UsbIp\Resolve-UsbHubPiAddress.ps1'
 $script:backendPath = Join-Path $script:clientRoot 'windows\UsbIp\Invoke-UsbHubUsbIp.ps1'
 $script:tunnelPath = Join-Path $script:clientRoot 'windows\UsbIp\Start-UsbHubTunnel.ps1'
 $script:powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -33,7 +34,8 @@ catch {
         "Could not read USBHub settings: $($_.Exception.Message)", 'USBHub setup error', 'OK', 'Error')
     exit 1
 }
-if (-not (Test-Path -LiteralPath $script:backendPath -PathType Leaf) -or
+if (-not (Test-Path -LiteralPath $script:networkResolverPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $script:backendPath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $script:tunnelPath -PathType Leaf)) {
     [void][System.Windows.Forms.MessageBox]::Show(
         'USBHub client files are incomplete. Re-run Install-UsbHubClient.ps1.', 'USBHub setup needed', 'OK', 'Warning')
@@ -66,11 +68,13 @@ function Test-UsbHubTunnel {
 $script:queryCommand = @'
 $ErrorActionPreference = 'Stop'
 try {
+    . $env:USBHUB_NETWORK_RESOLVER
     $config = Get-Content -LiteralPath $env:USBHUB_CONFIG_PATH -Raw | ConvertFrom-Json
+    $connectAddress = Resolve-UsbHubPiAddress -Address $config.PiAddress
     $sshArgs = @('-o', 'BatchMode=yes')
     if (-not [string]::IsNullOrWhiteSpace([string]$config.IdentityFile)) { $sshArgs += @('-i', [string]$config.IdentityFile) }
     if (-not [string]::IsNullOrWhiteSpace([string]$config.HostKeyAlias)) { $sshArgs += @('-o', "HostKeyAlias=$($config.HostKeyAlias)") }
-    $target = '{0}@{1}' -f $config.PiUser, $config.PiAddress
+    $target = '{0}@{1}' -f $config.PiUser, $connectAddress
 
     $inventory = @(& $env:USBHUB_SSH_PATH @sshArgs $target '/usr/sbin/usbip list --local' 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Could not read the Pi USB inventory: $($inventory -join ' ')" }
@@ -163,6 +167,7 @@ function Start-ChildPowerShell {
     $startInfo.RedirectStandardError = $true
     $startInfo.RedirectStandardInput = $true
     $startInfo.EnvironmentVariables['USBHUB_CONFIG_PATH'] = $script:configPath
+    $startInfo.EnvironmentVariables['USBHUB_NETWORK_RESOLVER'] = $script:networkResolverPath
     $startInfo.EnvironmentVariables['USBHUB_SSH_PATH'] = $script:sshPath
     $startInfo.EnvironmentVariables['USBHUB_USBIP_PATH'] = $script:usbipPath
     $process = New-Object System.Diagnostics.Process
