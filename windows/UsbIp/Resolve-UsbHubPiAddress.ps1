@@ -34,17 +34,32 @@ public static class UsbHubMdns
                     {
                         client.Client.Bind(new IPEndPoint(localAddress, 0));
                         client.Ttl = 255;
-                        client.Client.ReceiveTimeout = Math.Max(200, timeoutMilliseconds);
                         client.Send(query, query.Length, new IPEndPoint(MulticastAddress, 5353));
 
                         DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
+                        DateTime nextRetry = DateTime.UtcNow.AddMilliseconds(Math.Min(500, Math.Max(200, timeoutMilliseconds / 2)));
                         while (DateTime.UtcNow < deadline)
                         {
-                            IPEndPoint remote = new IPEndPoint(IPAddress.Any, 0);
-                            byte[] response = client.Receive(ref remote);
-                            IPAddress resolved = ReadAResponse(response, canonicalName);
-                            if (resolved != null)
-                                return resolved.ToString();
+                            DateTime wakeAt = nextRetry < deadline ? nextRetry : deadline;
+                            int waitMilliseconds = Math.Max(100, (int)(wakeAt - DateTime.UtcNow).TotalMilliseconds);
+                            client.Client.ReceiveTimeout = waitMilliseconds;
+                            try
+                            {
+                                IPEndPoint remote = new IPEndPoint(IPAddress.Any, 0);
+                                byte[] response = client.Receive(ref remote);
+                                IPAddress resolved = ReadAResponse(response, canonicalName);
+                                if (resolved != null)
+                                    return resolved.ToString();
+                            }
+                            catch (SocketException exception)
+                            {
+                                if (exception.SocketErrorCode != SocketError.TimedOut)
+                                    throw;
+                                if (DateTime.UtcNow >= deadline)
+                                    break;
+                                client.Send(query, query.Length, new IPEndPoint(MulticastAddress, 5353));
+                                nextRetry = DateTime.UtcNow.AddMilliseconds(500);
+                            }
                         }
                     }
                 }
@@ -180,7 +195,7 @@ function Resolve-UsbHubPiAddress {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string] $Address,
-        [ValidateRange(200, 5000)][int] $TimeoutMilliseconds = 900
+        [ValidateRange(200, 5000)][int] $TimeoutMilliseconds = 3000
     )
 
     $hostName = $Address.Trim().TrimEnd('.')

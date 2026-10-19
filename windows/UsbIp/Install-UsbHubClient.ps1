@@ -291,18 +291,26 @@ if ($LASTEXITCODE -eq 0 -and $remoteNameOutput.Count -gt 0) {
     $remoteName = ([string]$remoteNameOutput[0]).Trim()
     if ($remoteName -match '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$') {
         $candidatePiAddress = "$remoteName.local"
-        try {
-            $candidateConnectAddress = Resolve-UsbHubPiAddress -Address $candidatePiAddress
-            if ($candidateConnectAddress -eq $PiConnectAddress) {
-                $PiAddress = $candidatePiAddress
-                $config.PiAddress = $PiAddress
-                $tempConfig = "$configPath.tmp"
-                $config | ConvertTo-Json | Set-Content -LiteralPath $tempConfig -Encoding UTF8
-                Move-Item -LiteralPath $tempConfig -Destination $configPath -Force
+        $candidateConnectAddress = $null
+        $resolutionError = $null
+        for ($attempt = 1; $attempt -le 3 -and -not $candidateConnectAddress; $attempt++) {
+            try {
+                $candidateConnectAddress = Resolve-UsbHubPiAddress -Address $candidatePiAddress
+            }
+            catch {
+                $resolutionError = $_.Exception.Message
+                if ($attempt -lt 3) { Start-Sleep -Milliseconds 400 }
             }
         }
-        catch {
-            Write-Warning "Could not verify the Pi mDNS name $candidatePiAddress; keeping the configured address."
+        if ($candidateConnectAddress -eq $PiConnectAddress) {
+            $PiAddress = $candidatePiAddress
+            $config.PiAddress = $PiAddress
+            $tempConfig = "$configPath.tmp"
+            $config | ConvertTo-Json | Set-Content -LiteralPath $tempConfig -Encoding UTF8
+            Move-Item -LiteralPath $tempConfig -Destination $configPath -Force
+        }
+        elseif (-not $candidateConnectAddress) {
+            Write-Warning "Could not verify the Pi mDNS name $candidatePiAddress; keeping the configured address. $resolutionError"
         }
     }
 }
@@ -377,13 +385,24 @@ param(
 $ErrorActionPreference = 'SilentlyContinue'
 Stop-ScheduledTask -TaskName 'USBHub Auto Connect'
 Stop-ScheduledTask -TaskName 'USBHub SSH Tunnel'
+$stopperProcessId = $PID
 $runners = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
-    Where-Object { $_.CommandLine -and ($_.CommandLine.Contains($TunnelScript) -or ($_.CommandLine.Contains($AutoScript) -and $_.CommandLine.Contains('-Action Auto'))) })
+    Where-Object { $_.ProcessId -ne $stopperProcessId -and $_.CommandLine -and ($_.CommandLine.Contains($TunnelScript) -or ($_.CommandLine.Contains($AutoScript) -and $_.CommandLine.Contains('-Action Auto'))) })
 $runners | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-Sleep -Seconds 1
-$sshProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
-    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($IdentityFile) })
-$sshProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+$tunnelPattern = '-L 3240:127.0.0.1:3240'
+$sshTunnels = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($IdentityFile) -and $_.CommandLine.Contains($tunnelPattern) })
+$sshTunnels | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+for ($attempt = 0; $attempt -lt 20; $attempt++) {
+    $remainingTunnels = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($IdentityFile) -and $_.CommandLine.Contains($tunnelPattern) })
+    if ($remainingTunnels.Count -eq 0) { break }
+    Start-Sleep -Milliseconds 250
+}
+if ($remainingTunnels.Count -gt 0) {
+    throw 'USBHub SSH tunnel processes could not be stopped. Close them from Task Manager and retry setup.'
+}
 Write-Host 'USBHub SSH tunnel stopped for this Windows session.'
 '@
 Set-Content -LiteralPath $stopScript -Value $stopSource -Encoding UTF8
@@ -426,6 +445,11 @@ else {
 }
 
 & $powershellExe -NoProfile -ExecutionPolicy Bypass -File $stopScript -TunnelScript $tunnelScript -AutoScript $claimScript -IdentityFile $keyPath
+if ($LASTEXITCODE -ne 0) { throw 'Could not stop the previous USBHub tunnel; the replacement tunnel was not started.' }
+$tunnelPattern = '-L 3240:127.0.0.1:3240'
+$remainingTunnels = @(Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($keyPath) -and $_.CommandLine.Contains($tunnelPattern) })
+if ($remainingTunnels.Count -gt 0) { throw 'An old USBHub SSH tunnel is still running; the replacement tunnel was not started.' }
 Start-Process -FilePath $powershellExe -ArgumentList $startupShortcut.Arguments -WindowStyle Hidden
 
 Write-Host 'The hidden SSH tunnel starts now and at Windows sign-in. Devices remain on the Pi until a PC requests them.'
