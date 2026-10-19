@@ -30,6 +30,12 @@ apt-get install -y --no-install-recommends \
 	avahi-daemon avahi-utils libnss-mdns \
 	cockpit cockpit-system cockpit-networkmanager
 
+install -D -m 0755 "$(dirname "$0")/usbhub-ensure-hostname.sh" \
+	/usr/local/sbin/usbhub-ensure-hostname
+install -D -m 0644 "$(dirname "$0")/usbhub-ensure-hostname.service" \
+	/etc/systemd/system/usbhub-ensure-hostname.service
+systemctl daemon-reload
+systemctl enable --now usbhub-ensure-hostname.service
 systemctl enable --now avahi-daemon.service cockpit.socket
 systemctl restart avahi-daemon.service
 

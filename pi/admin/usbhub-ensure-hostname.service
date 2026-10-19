@@ -1,0 +1,12 @@
+[Unit]
+Description=Assign a unique mDNS hostname to default USBHub installations
+After=systemd-udev-settle.service
+Before=avahi-daemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/usbhub-ensure-hostname
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
