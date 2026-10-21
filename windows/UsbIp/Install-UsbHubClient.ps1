@@ -212,7 +212,13 @@ $installedUsbIpDir = Join-Path $clientRoot 'windows\UsbIp'
 $installedPiUsbIpDir = Join-Path $clientRoot 'pi\usbip'
 $clientSupportDir = Join-Path $clientRoot 'support'
 $resolverBackupPath = Join-Path $clientSupportDir 'Resolve-UsbHubPiAddress.txt'
+$deviceCenterLauncherSource = Join-Path $PSScriptRoot 'Launch-UsbHubDeviceCenter.ps1'
+$deviceCenterLauncherPath = Join-Path $clientRoot 'Launch-UsbHubDeviceCenter.ps1'
 New-Item -ItemType Directory -Path $installedUsbIpDir, $installedPiUsbIpDir, $clientSupportDir -Force | Out-Null
+if (-not (Test-Path -LiteralPath $deviceCenterLauncherSource -PathType Leaf)) {
+    throw "USBHub Device Center launcher source is missing: $deviceCenterLauncherSource"
+}
+Copy-Item -LiteralPath $deviceCenterLauncherSource -Destination $deviceCenterLauncherPath -Force
 $requiredSourceScripts = @(
     'Install-UsbHubClient.ps1',
     'Invoke-UsbHubUsbIp.ps1',
@@ -436,6 +442,7 @@ $requiredInstalledScripts = @(
     (Join-Path $installedUsbIpDir 'Resolve-UsbHubPiAddress.ps1'),
     (Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'),
     (Join-Path $installedUsbIpDir 'Show-UsbHubDeviceCenter.ps1'),
+    $deviceCenterLauncherPath,
     $resolverBackupPath,
     $tunnelScript,
     $stopScript
@@ -455,13 +462,13 @@ $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$claimScript`"
 $shortcut.WorkingDirectory = $installedUsbIpDir
 $shortcut.Description = 'Choose a USB device on the USBHub and claim it for this PC.'
 $shortcut.Save()
-$deviceCenterScript = Join-Path $installedUsbIpDir 'Show-UsbHubDeviceCenter.ps1'
+$deviceCenterScript = $deviceCenterLauncherPath
 $deviceCenterPath = Join-Path $desktop 'USBHub Device Center.lnk'
 $deviceCenter = $shell.CreateShortcut($deviceCenterPath)
 if ($null -eq $deviceCenter) { throw "Windows could not create the device center shortcut at $deviceCenterPath." }
 $deviceCenter.TargetPath = $powershellExe
 $deviceCenter.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -File `"$deviceCenterScript`""
-$deviceCenter.WorkingDirectory = $installedUsbIpDir
+$deviceCenter.WorkingDirectory = $clientRoot
 $deviceCenter.Description = 'Browse USB devices on the USBHub and use or return one on this PC.'
 $deviceCenter.Save()
 $stopShortcutPath = Join-Path $desktop 'Stop USBHub Tunnel.lnk'
