@@ -33,17 +33,24 @@ function Write-UsbHubStartupDiagnostic {
     catch { }
 }
 
-$script:resolverBackupPath = Join-Path $script:clientRoot 'support\Resolve-UsbHubPiAddress.ps1'
+$script:resolverBackupPath = Join-Path $script:clientRoot 'support\Resolve-UsbHubPiAddress.txt'
 $repairPath = Join-Path $script:scriptDirectory 'Resolve-UsbHubPiAddress.ps1.repair'
-if (-not [System.IO.File]::Exists($script:networkResolverPath) -and [System.IO.File]::Exists($script:resolverBackupPath)) {
+if (-not [System.IO.File]::Exists($script:networkResolverPath)) {
     try {
-        Copy-Item -LiteralPath $script:resolverBackupPath -Destination $repairPath -Force
+        Copy-Item -LiteralPath $script:resolverBackupPath -Destination $repairPath -Force -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $repairPath -PathType Leaf)) {
+            throw "The temporary resolver copy was not created at $repairPath"
+        }
         Move-Item -LiteralPath $repairPath -Destination $script:networkResolverPath -Force
+        if (-not [System.IO.File]::Exists($script:networkResolverPath)) {
+            throw "The resolver was not restored to $script:networkResolverPath"
+        }
         Write-UsbHubStartupDiagnostic 'Restored the missing address resolver from the local support copy.'
     }
     catch {
         Remove-Item -LiteralPath $repairPath -Force -ErrorAction SilentlyContinue
-        Write-UsbHubStartupDiagnostic "Resolver repair failed: $($_.Exception.Message)"
+        $backupVisible = Test-Path -LiteralPath $script:resolverBackupPath -PathType Leaf
+        Write-UsbHubStartupDiagnostic "Resolver repair from '$script:resolverBackupPath' failed; backup visible=$backupVisible; $($_.Exception.Message)"
     }
 }
 Write-UsbHubStartupDiagnostic ("Starting as {0}; PSScriptRoot='{1}'; config='{2}' exists={3}; resolver='{4}' exists={5}; backend='{6}' exists={7}; tunnel='{8}' exists={9}" -f `

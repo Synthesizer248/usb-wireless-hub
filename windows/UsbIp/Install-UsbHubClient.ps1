@@ -211,7 +211,7 @@ $clientRoot = Join-Path $configDir 'client'
 $installedUsbIpDir = Join-Path $clientRoot 'windows\UsbIp'
 $installedPiUsbIpDir = Join-Path $clientRoot 'pi\usbip'
 $clientSupportDir = Join-Path $clientRoot 'support'
-$resolverBackupPath = Join-Path $clientSupportDir 'Resolve-UsbHubPiAddress.ps1'
+$resolverBackupPath = Join-Path $clientSupportDir 'Resolve-UsbHubPiAddress.txt'
 New-Item -ItemType Directory -Path $installedUsbIpDir, $installedPiUsbIpDir, $clientSupportDir -Force | Out-Null
 $requiredSourceScripts = @(
     'Install-UsbHubClient.ps1',
