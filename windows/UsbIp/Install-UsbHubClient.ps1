@@ -210,7 +210,9 @@ Write-Host "USBip client is ready at: $usbipExe"
 $clientRoot = Join-Path $configDir 'client'
 $installedUsbIpDir = Join-Path $clientRoot 'windows\UsbIp'
 $installedPiUsbIpDir = Join-Path $clientRoot 'pi\usbip'
-New-Item -ItemType Directory -Path $installedUsbIpDir, $installedPiUsbIpDir -Force | Out-Null
+$clientSupportDir = Join-Path $clientRoot 'support'
+$resolverBackupPath = Join-Path $clientSupportDir 'Resolve-UsbHubPiAddress.ps1'
+New-Item -ItemType Directory -Path $installedUsbIpDir, $installedPiUsbIpDir, $clientSupportDir -Force | Out-Null
 $requiredSourceScripts = @(
     'Install-UsbHubClient.ps1',
     'Invoke-UsbHubUsbIp.ps1',
@@ -230,6 +232,10 @@ $missingCopiedScripts = @($requiredSourceScripts | ForEach-Object {
 })
 if ($missingCopiedScripts.Count -gt 0) {
     throw "USBHub client installation did not copy required files: $($missingCopiedScripts -join ', ')"
+}
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Resolve-UsbHubPiAddress.ps1') -Destination $resolverBackupPath -Force
+if (-not (Test-Path -LiteralPath $resolverBackupPath -PathType Leaf)) {
+    throw "USBHub client installation did not create the resolver backup: $resolverBackupPath"
 }
 Copy-Item -Path (Join-Path $PSScriptRoot '..\..\pi\usbip\*') -Destination $installedPiUsbIpDir -Force
 
@@ -430,6 +436,7 @@ $requiredInstalledScripts = @(
     (Join-Path $installedUsbIpDir 'Resolve-UsbHubPiAddress.ps1'),
     (Join-Path $installedUsbIpDir 'Invoke-UsbHubUsbIp.ps1'),
     (Join-Path $installedUsbIpDir 'Show-UsbHubDeviceCenter.ps1'),
+    $resolverBackupPath,
     $tunnelScript,
     $stopScript
 )

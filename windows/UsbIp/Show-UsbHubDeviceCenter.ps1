@@ -7,12 +7,14 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$script:configPath = Join-Path $env:LOCALAPPDATA 'UsbHub\client.json'
-# Resolve bundled scripts beside this entry point. LOCALAPPDATA is only for
-# per-user settings; using it as the executable base can point the GUI at a
-# different install when launched elevated or from a stale environment.
+# Resolve this installation from the entry point itself. A shortcut can be
+# launched with a stale LOCALAPPDATA environment, so use the installed layout
+# for both settings and bundled scripts.
 $script:scriptDirectory = $PSScriptRoot
 $script:clientRoot = Split-Path -Parent (Split-Path -Parent $script:scriptDirectory)
+$script:configRoot = Split-Path -Parent $script:clientRoot
+$script:configPath = Join-Path $script:configRoot 'client.json'
+$script:startupLogPath = Join-Path $script:clientRoot 'device-center-startup.log'
 $script:networkResolverPath = Join-Path $script:scriptDirectory 'Resolve-UsbHubPiAddress.ps1'
 $script:backendPath = Join-Path $script:scriptDirectory 'Invoke-UsbHubUsbIp.ps1'
 $script:tunnelPath = Join-Path $script:scriptDirectory 'Start-UsbHubTunnel.ps1'
@@ -23,7 +25,41 @@ if (-not (Test-Path -LiteralPath $script:usbipPath -PathType Leaf)) {
     $script:usbipPath = Join-Path ${env:ProgramFiles(x86)} 'USBip\usbip.exe'
 }
 
+function Write-UsbHubStartupDiagnostic {
+    param([Parameter(Mandatory = $true)][string] $Message)
+    try {
+        Add-Content -LiteralPath $script:startupLogPath -Encoding UTF8 -Value ('[{0:O}] {1}' -f [DateTime]::Now, $Message)
+    }
+    catch { }
+}
+
+$script:resolverBackupPath = Join-Path $script:clientRoot 'support\Resolve-UsbHubPiAddress.ps1'
+$repairPath = Join-Path $script:scriptDirectory 'Resolve-UsbHubPiAddress.ps1.repair'
+if (-not [System.IO.File]::Exists($script:networkResolverPath) -and [System.IO.File]::Exists($script:resolverBackupPath)) {
+    try {
+        Copy-Item -LiteralPath $script:resolverBackupPath -Destination $repairPath -Force
+        Move-Item -LiteralPath $repairPath -Destination $script:networkResolverPath -Force
+        Write-UsbHubStartupDiagnostic 'Restored the missing address resolver from the local support copy.'
+    }
+    catch {
+        Remove-Item -LiteralPath $repairPath -Force -ErrorAction SilentlyContinue
+        Write-UsbHubStartupDiagnostic "Resolver repair failed: $($_.Exception.Message)"
+    }
+}
+Write-UsbHubStartupDiagnostic ("Starting as {0}; PSScriptRoot='{1}'; config='{2}' exists={3}; resolver='{4}' exists={5}; backend='{6}' exists={7}; tunnel='{8}' exists={9}" -f `
+    [Security.Principal.WindowsIdentity]::GetCurrent().Name,
+    $script:scriptDirectory,
+    $script:configPath,
+    [System.IO.File]::Exists($script:configPath),
+    $script:networkResolverPath,
+    [System.IO.File]::Exists($script:networkResolverPath),
+    $script:backendPath,
+    [System.IO.File]::Exists($script:backendPath),
+    $script:tunnelPath,
+    [System.IO.File]::Exists($script:tunnelPath))
+
 if (-not (Test-Path -LiteralPath $script:configPath -PathType Leaf)) {
+    Write-UsbHubStartupDiagnostic "Blocked: settings file not found at '$script:configPath'."
     [void][System.Windows.Forms.MessageBox]::Show(
         'This PC is not configured for USBHub yet. Run Install-UsbHubClient.ps1 once, then open Device Center again.',
         'USBHub setup needed', 'OK', 'Information')
@@ -34,6 +70,7 @@ try {
     if ([string]::IsNullOrWhiteSpace([string]$script:config.PiAddress)) { throw 'The Pi address is missing from client.json.' }
 }
 catch {
+    Write-UsbHubStartupDiagnostic "Blocked: could not read settings: $($_.Exception.Message)"
     [void][System.Windows.Forms.MessageBox]::Show(
         "Could not read USBHub settings: $($_.Exception.Message)", 'USBHub setup error', 'OK', 'Error')
     exit 1
@@ -46,17 +83,20 @@ $requiredClientPaths = @(
 $missingClientPaths = @($requiredClientPaths | Where-Object { -not [System.IO.File]::Exists($_) })
 if ($missingClientPaths.Count -gt 0) {
     $missingList = $missingClientPaths -join [Environment]::NewLine
+    Write-UsbHubStartupDiagnostic "Blocked: required scripts missing: $($missingClientPaths -join '; ')"
     $message = "USBHub client files are incomplete. Missing:`r`n$missingList`r`n`r`nChecked folder: $script:scriptDirectory`r`nRe-run Install-UsbHubClient.ps1."
     [void][System.Windows.Forms.MessageBox]::Show(
         $message, 'USBHub setup needed', 'OK', 'Warning')
     exit 1
 }
 if (-not $script:sshPath -or -not (Test-Path -LiteralPath $script:usbipPath -PathType Leaf)) {
+    Write-UsbHubStartupDiagnostic "Blocked: ssh='$script:sshPath'; usbip='$script:usbipPath' exists=$([System.IO.File]::Exists($script:usbipPath))"
     [void][System.Windows.Forms.MessageBox]::Show(
         'OpenSSH Client or the USBip client is missing. Re-run Install-UsbHubClient.ps1 to repair this PC.',
         'USBHub client missing', 'OK', 'Warning')
     exit 1
 }
+Write-UsbHubStartupDiagnostic 'Startup checks passed; building Device Center window.'
 
 function ConvertTo-PowerShellLiteral {
     param([AllowEmptyString()][string] $Value)
