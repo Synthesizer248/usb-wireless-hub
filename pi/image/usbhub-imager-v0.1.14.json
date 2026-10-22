@@ -1,0 +1,18 @@
+{
+  "os_list": [
+    {
+      "name": "USBHub Raspberry Pi OS Lite 64-bit (v0.1.14)",
+      "description": "USBHub image for Raspberry Pi Zero 2 W. Raspberry Pi Imager customization configures the first-boot account, Wi-Fi, SSH, and optional Connect enrollment.",
+      "url": "https://github.com/Synthesizer248/usb-wireless-hub/releases/download/pi-image-v0.1.14/2026-10-19-raspios-trixie-arm64-lite.img.xz",
+      "extract_size": 3128950784,
+      "extract_sha256": "6402a59678e7542ad87e414d2e76488a1c93ccd063ff800e707c5dbf81aeb8ca",
+      "image_download_size": 693053376,
+      "image_download_sha256": "c87c487bd4bba43388bd4a9379272f5700fcd3d72fc4d85e3781ed33b7df0618",
+      "release_date": "2026-10-19",
+      "init_format": "cloudinit-rpi",
+      "devices": ["pi3-64bit"],
+      "capabilities": ["rpi_connect"],
+      "website": "https://github.com/Synthesizer248/usb-wireless-hub/releases/tag/pi-image-v0.1.14"
+    }
+  ]
+}
