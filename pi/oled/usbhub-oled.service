@@ -1,0 +1,14 @@
+[Unit]
+Description=Show USBHub SSH address on an I2C OLED
+After=network-online.target systemd-modules-load.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/usbhub-oled
+ExecStart=/usr/bin/python3 /usr/local/sbin/usbhub-oled-ssh-address
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -27,6 +27,8 @@ The broad goal is a wireless USB hub for devices such as flash drives, printers,
 
 To flash a fresh Raspberry Pi OS Lite image with the USB/IP host service and storage safety helper, see [the Pi image build and flashing guide](pi/image/README.md). The image is built for 64-bit Raspberry Pi OS and is currently targeted at the Zero 2 W; configure Wi-Fi, account, hostname, and SSH in Raspberry Pi Imager on first flash.
 
+New Pi image builds include support for an optional four-pin I²C OLED to show the current SSH IP address, login username, and port. The published v0.1.14 image predates this addition; an existing Pi can install it from a repository checkout. See [pi/oled/README.md](pi/oled/README.md) for wiring and setup.
+
 ## Pi web admin console
 
 The flash image includes Cockpit and Avahi. From a phone or laptop on the same LAN, open `https://<Pi-hostname>.local:9090` (for example, `https://usbwirelesshub.local:9090`). On the first password-authenticated login, enter the temporary password configured in Raspberry Pi Imager; the Pi then requires you to set your own password before continuing. Later, use Cockpit's **Accounts** page to change the password again. Cockpit also provides a browser terminal and, through its NetworkManager component, Wi-Fi SSID/password management. The first visit uses a self-signed HTTPS certificate and may show a browser warning. Changing the active Wi-Fi connection can interrupt the console until the Pi reconnects. For an existing Pi, run `sudo bash pi/admin/Install-UsbHubAdminConsole.sh usbwirelesshub` from the repository to install it and set a unique mDNS hostname; this existing-Pi installer does not force a password change.

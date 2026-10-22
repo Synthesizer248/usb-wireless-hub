@@ -1,6 +1,6 @@
 # USBHub flash image
 
-This folder defines a Raspberry Pi OS Lite 64-bit image for USBHub. The image is built from the official Raspberry Pi `pi-gen` ARM64 branch and adds the USB/IP userspace tools, the Pi-side guarded bind/unbind helper, a systemd USB/IP server restricted to loopback, and a Cockpit web admin console with Wi-Fi controls. Avahi advertises the configured Pi hostname over mDNS. The kernel and USB/IP host modules come from Raspberry Pi OS packages.
+This folder defines a Raspberry Pi OS Lite 64-bit image for USBHub. The image is built from the official Raspberry Pi `pi-gen` ARM64 branch and adds the USB/IP userspace tools, the Pi-side guarded bind/unbind helper, a systemd USB/IP server restricted to loopback, a Cockpit web admin console with Wi-Fi controls, and an optional I²C OLED service that displays the Pi's SSH address. Avahi advertises the configured Pi hostname over mDNS. The kernel and USB/IP host modules come from Raspberry Pi OS packages.
 
 The image contains no Wi-Fi credentials, account password, SSH host keys, TLS private keys, or machine-specific IP address. On first flash, use Raspberry Pi Imager's OS customization to set the hostname, account, Wi-Fi, and SSH access. If the default hostname `raspberrypi`, `usbwirelesshub`, or the image's `usbhub` name is left in place, the first boot changes it to `usbwirelesshub-<onboard-interface-MAC>` before Avahi starts, so multiple hubs do not advertise the same `.local` name. A hostname explicitly chosen in Imager is kept. Do not reuse an image after booting it on more than one Pi without regenerating its SSH host keys.
 
@@ -22,6 +22,12 @@ The image build targets 64-bit Raspberry Pi OS Lite and is intended first for Ra
 The catalog is pinned to image release `v0.1.14`; update its image URL, sizes, hashes, release date, and versioned filename when publishing a later image. Directly choosing **Use custom** with the `.img.xz` bypasses this catalog and therefore does not expose Raspberry Pi Imager's first-boot customization for this image.
 
 The bundled image includes the device-class-agnostic USB/IP transport. Windows still needs its upstream USB/IP kernel client installed once per PC with administrator approval. The Windows class driver handles an attached USB device. Device compatibility depends on the device's transfer types and the Wi-Fi/network; webcam isochronous streaming is not yet validated.
+
+## Optional OLED address display
+
+See [the OLED wiring and setup guide](../oled/README.md). The image enables I²C and starts a service for a four-pin 128×32 SSD1306/SH1106 display. Wire VCC to 3.3 V (physical pin 1), GND to pin 6, SCL to pin 5, and SDA to pin 3 while the Pi is powered off. The display shows the current Wi-Fi IP, configured login username, and SSH port. For an already-flashed Pi, run `sudo bash pi/oled/install.sh` from a repository checkout and reboot.
+
+The currently published v0.1.14 image predates this OLED addition. A later image build from this source will include it automatically; existing systems can use the installer above.
 
 ## Scope and safety
 
